@@ -83,6 +83,7 @@ const run = async () => {
       continue;
     }
 
+    // Approximate avg. trade price of binance = last traded binance quote price
     let amountInAark = 0;
     if (aarkMarketMP < binanceBid) {
       for (const [p, q] of binanceOrderbook.bids) {
