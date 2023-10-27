@@ -4,11 +4,12 @@ import { BinanceService } from "./services/binance.service";
 import { AarkService } from "./services/aark.service";
 import { OrderInfo } from "./interfaces/order-interface";
 import { sleep } from "./utils/time";
+import { logArbitrage, logUnhedged } from "./utils/logger";
 
 require("dotenv").config();
 
-const binance = new BinanceService();
-const aark: AarkService = new AarkService();
+const binance = new BinanceService(loadTargetMarketSymbols());
+const aark = new AarkService(loadTargetMarketSymbols());
 
 const run = async () => {
   // Constants
@@ -61,15 +62,13 @@ const run = async () => {
       );
       let side =
         aarkPositionAmount + binancePositionAmount > 0 ? "buy" : "sell";
-      console.log(
-        `
-  **** UNHEDGED ${symbol} ****
-  AARK Position Qty    : ${aarkPositionAmount.toFixed(6)}
-  Binance Position Qty : ${binancePositionAmount.toFixed(6)}
-  Unhedged Value : $${unhedgedValue.toFixed(2)}
-  >> Hedge Position by ${side.toUpperCase() + "ING"} ${absAmountToHedge.toFixed(
-          6
-        )} ${symbol} in BINANCE`
+      logUnhedged(
+        symbol,
+        aarkPositionAmount,
+        binancePositionAmount,
+        unhedgedValue,
+        side,
+        absAmountToHedge
       );
 
       OrderInfoMap[symbol] = {
@@ -131,14 +130,7 @@ const run = async () => {
           binanceMid,
         Math.abs(amountInAark)
       );
-      console.log(`
-  ~~~~ ARBITRIGING ${symbol} ~~~~
-  BUY IN AARK, SELL IN BINANCE
-  AARK Mark Price      : ${aarkMarketMP.toFixed(6)}
-  Binance Bid Price    : ${binanceBid.toFixed(6)}
-  Price Ratio          : ${(binanceBid / aarkMarketMP - 1).toFixed(6)}
-  Order Amount in AARK : ${amountInAark.toFixed(6)}
-      `);
+      logArbitrage(symbol, aarkMarketMP, binanceBid, amountInAark, true);
       OrderInfoMap[symbol] = {
         symbol,
         amountInAark: amountInAark,
@@ -150,15 +142,7 @@ const run = async () => {
           binanceMid,
         Math.abs(amountInAark)
       );
-      console.log(`
-  ~~~~ ARBITRIGING ${symbol} ~~~~
-  BUY IN BINANCE, SELL IN AARK
-  AARK Mark Price      : ${aarkMarketMP.toFixed(6)}
-  Binance Ask Price    : ${binanceAsk.toFixed(6)}
-  Price Ratio          : ${(binanceAsk / aarkMarketMP - 1).toFixed(6)}
-  Order Amount in Aark : ${amountInAark.toFixed(6)}
-      `);
-
+      logArbitrage(symbol, aarkMarketMP, binanceAsk, amountInAark, false);
       OrderInfoMap[symbol] = {
         symbol,
         amountInAark: amountInAark,
