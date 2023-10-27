@@ -20,8 +20,8 @@ export class AarkService {
     process.env.ALCHEMY_API_KEY!
   );
 
-  constructor() {
-    this.symbolList = loadTargetMarketSymbols();
+  constructor(symbolList: string[]) {
+    this.symbolList = symbolList;
     this.signer = new ethers.Wallet(process.env.SIGNER_PK!, this.provider);
     this.contractReader = new ethers.Contract(
       contractAddressMap["contractReader"],

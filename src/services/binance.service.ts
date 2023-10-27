@@ -15,12 +15,12 @@ export class BinanceService {
     };
   };
 
-  constructor() {
+  constructor(symbolList: string[]) {
     this.client = new ccxt.binanceusdm({
       apiKey: process.env.BINANCE_API_KEY,
       secret: process.env.BINANCE_SECRET,
     });
-    this.symbolList = loadTargetMarketSymbols();
+    this.symbolList = symbolList;
     this.marketStatus = {};
     this.symbolList.forEach((symbol) => {
       this.marketStatus[symbol] = { orderbook: undefined, position: undefined };
