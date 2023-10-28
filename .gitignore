@@ -3,3 +3,4 @@ src/scripts
 
 *.env
 *.yaml
+*.log
