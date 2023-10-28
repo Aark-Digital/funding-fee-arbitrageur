@@ -8,5 +8,5 @@ export function loadStrategyEnv(): number[] {
 }
 
 export function loadTargetMarketSymbols(): string[] {
-  return JSON.parse(process.env.TARGET_MARKET_SYMBOLS!);
+  return JSON.parse(process.env.TARGET_MARKETS!);
 }
