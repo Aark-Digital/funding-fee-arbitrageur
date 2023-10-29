@@ -6,7 +6,11 @@ async function main() {
   const { strategy } = require(`./strategies/${process.env.STRATEGY}.ts`);
 
   while (true) {
-    strategy();
+    try {
+      strategy();
+    } catch (e) {
+      console.log(e);
+    }
     await sleep(5000);
   }
 }

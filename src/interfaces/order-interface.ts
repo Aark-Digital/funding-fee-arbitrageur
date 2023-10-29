@@ -5,26 +5,24 @@ export enum Side {
 }
 
 export enum OrderType {
-  Limit,
-  Market,
+  Limit = "Limit",
+  Market = "Market",
 }
 
 export enum ActionType {
-  CreateLimit,
-  CreateMarket,
-  Cancel,
+  CreateLimit = "CreateLimit",
+  CreateMarket = "CreateMarket",
+  Cancel = "Cancel",
 }
 export interface ILimitOrderParam {
   symbol: string;
   price: number;
-  qty: number;
-  side: Side;
+  size: number;
 }
 
 export interface IMarketOrderParam {
   symbol: string;
-  qty: number;
-  side: Side;
+  size: number;
 }
 
 export interface ICancelOrderParam {

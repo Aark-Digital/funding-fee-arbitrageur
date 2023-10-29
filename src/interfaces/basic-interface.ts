@@ -3,8 +3,7 @@ import { Side } from "./order-interface";
 export interface Position {
   timestamp: number;
   symbol: string;
-  qty: number;
-  side: Side;
+  size: number;
 }
 
 export interface Orderbook {
@@ -25,7 +24,6 @@ export interface OpenOrder {
   symbol: string;
   orderId: string;
   price: number;
-  qty: number;
-  side: Side;
+  size: number;
   remaining: number;
 }

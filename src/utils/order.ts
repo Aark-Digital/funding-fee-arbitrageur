@@ -1,4 +1,4 @@
-import { OpenOrder } from "../interfaces/basic-interface";
+import { OpenOrder, Position } from "../interfaces/basic-interface";
 import {
   ActionType,
   ICancelOrderParam,
@@ -57,8 +57,9 @@ export function getActionParamsFromTargetOrder(
     let isTarget = false;
     for (const targetOrder of targetOrders) {
       if (
+        // Check if target order have same price and same sign
         openOrder.price == targetOrder.price &&
-        openOrder.side === targetOrder.side
+        openOrder.size * targetOrder.size > 0
       ) {
         isTarget = true;
         break;
@@ -77,7 +78,7 @@ export function getActionParamsFromTargetOrder(
     for (const openOrder of openOrders) {
       if (
         openOrder.price == targetOrder.price &&
-        openOrder.side === targetOrder.side
+        openOrder.size * targetOrder.size > 0
       ) {
         isExists = true;
         break;
@@ -87,4 +88,19 @@ export function getActionParamsFromTargetOrder(
       limitOrderParams.push(targetOrder);
     }
   }
+}
+
+export function adjustOrderSize(
+  position: Position,
+  orderSize: number,
+  maxPosQty: number,
+  minOrderQty: number = 0
+) {
+  let size;
+  if (orderSize > 0) {
+    size = Math.min(maxPosQty - position.size, orderSize);
+  } else {
+    size = Math.max(-maxPosQty - position.size, orderSize);
+  }
+  return Math.abs(size) < minOrderQty ? 0 : size;
 }

@@ -72,18 +72,16 @@ export class BinanceService {
       const balances = await this.client.fetchBalance();
 
       this.symbolList.forEach((symbol: string) => {
-        const fsymbol = this.getFormattedSymbol(symbol);
+        const fsymbol = symbol.replace("_", "");
         const positionInfo = balances.info.positions.find(
           (pos: any) => pos.symbol === fsymbol
         );
         if (positionInfo !== undefined) {
-          const qty = Math.abs(Number(positionInfo.positionAmt));
-          const side = qty > 0 ? Side.Buy : qty < 0 ? Side.Sell : Side.Zero;
+          const size = Number(positionInfo.positionAmt);
           this.marketInfo[symbol].position = {
             symbol,
-            qty,
-            side,
-            timestamp: positionInfo.updateTime,
+            size,
+            timestamp: new Date().getTime(),
           };
         }
       });
@@ -106,9 +104,11 @@ export class BinanceService {
           symbol,
           orderId: openOrder.id,
           price: openOrder.price,
-          qty: openOrder.amount,
-          side: openOrder.side === "buy" ? Side.Buy : Side.Sell,
-          remaining: openOrder.remaining,
+          size: openOrder.side === "buy" ? openOrder.amount : -openOrder.amount,
+          remaining:
+            openOrder.side === "buy"
+              ? openOrder.remaining
+              : -openOrder.remaining,
           timestamp: openOrder.timestamp,
         }));
       } catch (e) {
@@ -144,8 +144,8 @@ export class BinanceService {
         this.client.createOrder(
           this.getFormattedSymbol(param.symbol),
           "market",
-          param.side.toString(),
-          param.qty
+          param.size > 0 ? "buy" : "sell",
+          Math.abs(param.size)
         )
       )
     );
@@ -155,8 +155,8 @@ export class BinanceService {
         this.client.createOrder(
           this.getFormattedSymbol(param.symbol),
           "limit",
-          param.side.toString(),
-          param.qty,
+          param.size > 0 ? "buy" : "sell",
+          Math.abs(param.size),
           param.price
         )
       )
