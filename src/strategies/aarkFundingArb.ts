@@ -4,8 +4,10 @@ import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
 import { BinanceService } from "../services/binance.service";
 import { loadTargetMarketSymbols } from "../utils/env";
+import { formatNumber } from "../utils/number";
 import { addCreateMarketParams, adjustOrderSize } from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
+import { table } from "table";
 
 const binanceService = new BinanceService(
   process.env.BINANCE_API_KEY!,
@@ -18,7 +20,11 @@ const binanceService = new BinanceService(
 const aarkService = new AarkService(
   JSON.parse(process.env.TARGET_CRYPTO_LIST!).map(
     (symbol: string) => `${symbol}_USDC`
-  )
+  ),
+  process.env.SIGNER_PK!,
+  Number(process.env.OCT_DELEGATE_EPOCH),
+  process.env.OCT_DELEGATE_SEED,
+  Boolean(process.env.OCT_IS_DELEGATED)
 );
 
 const [
@@ -55,6 +61,13 @@ export async function strategy() {
   }
   const USDC_USDT_PRICE =
     (binanceUSDCInfo.asks[0][0] + binanceUSDCInfo.bids[0][0]) / 2;
+
+  const arbitrageDetected: string[][] = [
+    ["crypto", "price_bn", "price_a", "skewness", "aark Prem. (%)"],
+  ];
+  const unhedgedDetected: string[][] = [
+    ["crypto", "pos_bn", "pos_a", "unhedged value ($)"],
+  ];
 
   for (const crypto of cryptoList) {
     const binanceMarketInfo = binanceInfo[`${crypto}_USDT`];
@@ -93,6 +106,12 @@ export async function strategy() {
           size: unhedgedSize < 0 ? absAmountToHedge : -absAmountToHedge,
         },
       ]);
+      unhedgedDetected.push([
+        crypto,
+        bnPosition.size.toPrecision(4),
+        aarkPosition.size.toPrecision(4),
+        (Math.abs(unhedgedSize) * binanceMidUSDT).toPrecision(4),
+      ]);
       continue;
     }
 
@@ -103,6 +122,20 @@ export async function strategy() {
       PRICE_DIFF_THRESHOLD,
       USDC_USDT_PRICE
     );
+    if (orderSizeInAark !== 0) {
+      const bnPrice = binanceMidUSDT / USDC_USDT_PRICE;
+      const aPrice =
+        aarkIndexPrice *
+        (1 + aarkMarketStatus.skewness / aarkMarketStatus.depthFactor / 100);
+      const aarkPremium = aPrice / bnPrice - 1;
+      arbitrageDetected.push([
+        crypto,
+        bnPrice.toPrecision(7),
+        aPrice.toPrecision(7),
+        aarkMarketStatus.skewness.toPrecision(5),
+        (aarkPremium * 100).toPrecision(4),
+      ]);
+    }
 
     orderSizeInAark = adjustOrderSize(
       aarkPosition,
@@ -127,11 +160,19 @@ export async function strategy() {
     }
   }
 
-  console.log(
-    "------ Binance ------",
-    JSON.stringify(binanceActionParams, null, 2)
-  );
-  console.log("------ Aark ------", JSON.stringify(aarkActionParams, null, 2));
+  console.log("------ Unhedged Detected ------");
+  console.log(table(unhedgedDetected));
+  console.log("------ Arbitrage Detected ------");
+  console.log(table(arbitrageDetected));
+
+  // console.log(
+  //   "------ Binance ------\n",
+  //   JSON.stringify(binanceActionParams, null, 2)
+  // );
+  // console.log(
+  //   "------ Aark ------\n",
+  //   JSON.stringify(aarkActionParams, null, 2)
+  // );
 
   // await Promise.all([
   //   binanceService.executeOrders(binanceActionParams),
@@ -151,6 +192,7 @@ function calcArbAmount(
   const depthFactor = Number(aarkMarketStatus.depthFactor);
   const skewness = Number(aarkMarketStatus.skewness);
 
+  // Aark Buy
   let orderSizeInAark = 0;
   for (const [p, q] of bnOrderbook.bids) {
     const deltaAmount = Math.min(
@@ -162,16 +204,24 @@ function calcArbAmount(
           skewness) -
         orderSizeInAark
     );
+    if (deltaAmount < 0) {
+      break;
+    }
     orderSizeInAark += deltaAmount;
     if (deltaAmount !== q) {
       break;
     }
   }
 
-  if (orderSizeInAark !== 0) {
-    return orderSizeInAark;
+  if (orderSizeInAark > 0) {
+    if (aarkMarketStatus.skewness < 0) {
+      return orderSizeInAark;
+    } else {
+      return 0;
+    }
   }
 
+  // Aark Sell
   for (const [p, q] of bnOrderbook.asks) {
     const deltaAmount = Math.min(
       q,
@@ -183,11 +233,22 @@ function calcArbAmount(
           skewness) +
         orderSizeInAark
     );
+    if (deltaAmount < 0) {
+      break;
+    }
     orderSizeInAark -= deltaAmount;
     if (deltaAmount !== q) {
       break;
     }
   }
 
-  return orderSizeInAark;
+  if (orderSizeInAark < 0) {
+    if (aarkMarketStatus.skewness > 0) {
+      return orderSizeInAark;
+    } else {
+      return 0;
+    }
+  }
+
+  return 0;
 }
