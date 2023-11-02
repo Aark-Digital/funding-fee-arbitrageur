@@ -1,9 +1,5 @@
-import BigNumber from "bignumber.js";
-import ccxt, { Order, Exchange } from "ccxt";
-import { OrderBook, binanceusdm } from "ccxt";
+import ccxt, { Exchange } from "ccxt";
 import { sleep } from "../utils/time";
-import { loadTargetMarketSymbols } from "../utils/env";
-import { IExchangeService } from "../class/exchange-class";
 import { IMarket } from "../interfaces/market-interface";
 import {
   ActionType,
@@ -13,20 +9,33 @@ import {
   IMarketOrderParam,
   Side,
 } from "../interfaces/order-interface";
-import { Position } from "../interfaces/basic-interface";
-export class BinanceService {
+import {
+  ceil_dp,
+  convertSizeToContractAmount,
+  floor_dp,
+  numberToPrecision,
+  round_dp,
+} from "../utils/number";
+
+export class OkxSwapService {
   private client: Exchange;
   private symbolList: string[];
-  private marketInfo: { [symbol: string]: IMarket } = {};
+  private markets: { [symbol: string]: IMarket } = {};
 
-  constructor(apiKey: string, secret: string, symbolList: string[]) {
-    this.client = new ccxt.binanceusdm({
+  constructor(
+    apiKey: string,
+    secret: string,
+    password: string,
+    symbolList: string[]
+  ) {
+    this.client = new ccxt.okex({
       apiKey,
       secret,
+      password,
     });
     this.symbolList = symbolList;
     this.symbolList.forEach((symbol) => {
-      this.marketInfo[symbol] = {
+      this.markets[symbol] = {
         orderbook: undefined,
         position: undefined,
         openOrders: undefined,
@@ -37,26 +46,36 @@ export class BinanceService {
   }
 
   async init() {
-    return;
+    const totalMarketInfo = await this.client.fetchMarkets();
+    this.symbolList.forEach((symbol: string) => {
+      const targetInstId = `${symbol.replace("_", "-")}-SWAP`;
+      const marketInfo = totalMarketInfo.find(
+        (info: any) => info.id === targetInstId
+      )!;
+      this.markets[symbol].marketInfo = {
+        contractSize: marketInfo.contractSize!,
+        pricePrecision: numberToPrecision(marketInfo.precision.price!),
+        qtyPrecision: numberToPrecision(marketInfo.precision.amount!),
+      };
+    });
   }
 
   getFormattedSymbol(symbol: string) {
     const [base, quote] = symbol.split("_");
-    return `${base}/${quote}`;
+    return `${base}/${quote}:${quote}`;
   }
 
   getMarketInfo() {
-    return this.marketInfo;
+    return this.markets;
   }
 
   async fetchOrderbooks() {
-    const orderbooks: { [symbol: string]: OrderBook | undefined } = {};
     for (const symbol of this.symbolList) {
       try {
         const ob = await this.client.fetchOrderBook(
           this.getFormattedSymbol(symbol)
         );
-        this.marketInfo[symbol].orderbook = {
+        this.markets[symbol].orderbook = {
           symbol,
           bids: ob.bids,
           asks: ob.asks,
@@ -64,38 +83,32 @@ export class BinanceService {
         };
       } catch (e) {
         console.log(`[ERROR] Failed to fetch ${symbol} orderbook : ${e}`);
-        this.marketInfo[symbol].orderbook = undefined;
+        this.markets[symbol].orderbook = undefined;
       }
       await sleep(100);
     }
-    return orderbooks;
   }
 
   async fetchPositions() {
-    try {
-      const result: { [symbol: string]: Position } = {};
-      const balances = await this.client.fetchBalance();
-
-      this.symbolList.forEach((symbol: string) => {
-        const fsymbol = symbol.replace("_", "");
-        const positionInfo = balances.info.positions.find(
-          (pos: any) => pos.symbol === fsymbol
+    for (const symbol of this.symbolList) {
+      try {
+        const position = await this.client.fetchPosition(
+          this.getFormattedSymbol(symbol)
         );
-        if (positionInfo !== undefined) {
-          const size = Number(positionInfo.positionAmt);
-          this.marketInfo[symbol].position = {
-            symbol,
-            size,
-            timestamp: new Date().getTime(),
-          };
-        }
-      });
-      return result;
-    } catch (e) {
-      console.log(`[ERROR] Failed to fetch Balance & Position Info : ${e}`);
-      this.symbolList.forEach((symbol: string) => {
-        this.marketInfo[symbol].position = undefined;
-      });
+        this.markets[symbol].position = {
+          symbol,
+          price: position.entryPrice ?? 0,
+          size:
+            position.contracts! *
+            position.contractSize! *
+            (position.side === "long" ? 1 : -1),
+          timestamp: new Date().getTime()!,
+        };
+      } catch (e) {
+        console.log(`[ERROR] Failed to fetch ${symbol} position : ${e}`);
+        this.markets[symbol].orderbook = undefined;
+      }
+      await sleep(100);
     }
   }
 
@@ -105,7 +118,7 @@ export class BinanceService {
         const oo = await this.client.fetchOpenOrders(
           this.getFormattedSymbol(symbol)
         );
-        this.marketInfo[symbol].openOrders = {
+        this.markets[symbol].openOrders = {
           timestamp: new Date().getTime(),
           openOrders: oo.map((openOrder: any) => ({
             symbol,
@@ -122,7 +135,7 @@ export class BinanceService {
         };
       } catch (e) {
         console.log(`[ERROR] Failed to fetch ${symbol} open orders : ${e}`);
-        this.marketInfo[symbol].openOrders = undefined;
+        this.markets[symbol].openOrders = undefined;
       }
       await sleep(100);
     }
@@ -154,19 +167,32 @@ export class BinanceService {
           this.getFormattedSymbol(param.symbol),
           "market",
           param.size > 0 ? "buy" : "sell",
-          Math.abs(param.size)
+          convertSizeToContractAmount(
+            param.size,
+            this.markets[param.symbol].marketInfo
+          )
         )
       )
     );
-    console.log(JSON.stringify(limitOrderParams, null, 2));
     await Promise.all(
       limitOrderParams.map((param: ILimitOrderParam) =>
         this.client.createOrder(
           this.getFormattedSymbol(param.symbol),
           "limit",
           param.size > 0 ? "buy" : "sell",
-          Math.abs(param.size),
-          param.price
+          convertSizeToContractAmount(
+            param.size,
+            this.markets[param.symbol].marketInfo
+          ),
+          param.size > 0
+            ? floor_dp(
+                param.price,
+                this.markets[param.symbol].marketInfo.pricePrecision
+              )
+            : ceil_dp(
+                param.price,
+                this.markets[param.symbol].marketInfo.pricePrecision
+              )
         )
       )
     );

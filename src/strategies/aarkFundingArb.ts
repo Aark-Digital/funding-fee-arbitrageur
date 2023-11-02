@@ -1,30 +1,33 @@
 import { Orderbook, Position } from "../interfaces/basic-interface";
-import { IAarkMarketStatus } from "../interfaces/market-interface";
+import {
+  IAarkMarket,
+  IAarkMarketStatus,
+  IMarket,
+} from "../interfaces/market-interface";
 import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
 import { BinanceService } from "../services/binance.service";
+import { OkxSwapService } from "../services/okx.service";
 import { loadTargetMarketSymbols } from "../utils/env";
 import { formatNumber } from "../utils/number";
 import { addCreateMarketParams, adjustOrderSize } from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
 import { table } from "table";
 
-const binanceService = new BinanceService(
-  process.env.BINANCE_API_KEY!,
-  process.env.BINANCE_SECRET!,
+const cexService = new OkxSwapService(
+  process.env.OKX_API_KEY!,
+  process.env.OKX_API_SECRET!,
+  process.env.OKX_API_PASSWORD!,
   JSON.parse(process.env.TARGET_CRYPTO_LIST!)
     .map((symbol: string) => `${symbol}_USDT`)
     .concat(["USDC_USDT"])
 );
 
 const aarkService = new AarkService(
+  process.env.SIGNER_PK!,
   JSON.parse(process.env.TARGET_CRYPTO_LIST!).map(
     (symbol: string) => `${symbol}_USDC`
-  ),
-  process.env.SIGNER_PK!,
-  Number(process.env.OCT_DELEGATE_EPOCH),
-  process.env.OCT_DELEGATE_SEED,
-  Boolean(process.env.OCT_IS_DELEGATED)
+  )
 );
 
 const [
@@ -39,145 +42,171 @@ const [
   process.env.MAX_ORDER_USDT!,
 ].map((param: string) => parseFloat(param));
 
+export async function initializeStrategy() {
+  await cexService.init();
+  await aarkService.init();
+}
+
 export async function strategy() {
-  const binanceActionParams: IActionParam[] = [];
+  const cexActionParams: IActionParam[] = [];
   const aarkActionParams: IActionParam[] = [];
+  const arbitrageDetected: string[][] = [
+    ["crypto", "price_bn", "price_a", "skewness", "aark Prem. (%)"],
+  ];
+  const marketSummary: string[][] = [
+    ["crypto", "Pm_ex%", "Pm_skew%", "$Skew", "Fr24h%", "$avl.Value"],
+  ];
+  const unhedgedDetected: string[][] = [
+    ["crypto", "pos_bn", "pos_a", "unhedged value ($)"],
+  ];
   await Promise.all([
-    binanceService.fetchOpenOrders(),
-    binanceService.fetchPositions(),
-    binanceService.fetchOrderbooks(),
+    cexService.fetchOpenOrders(),
+    cexService.fetchPositions(),
+    cexService.fetchOrderbooks(),
     aarkService.fetchIndexPrices(),
     aarkService.fetchPositions(),
     aarkService.fetchMarketStatuses(),
   ]);
 
-  const binanceInfo = binanceService.getMarketInfo();
+  const cexInfo = cexService.getMarketInfo();
   const aarkInfo = aarkService.getMarketInfo();
   const cryptoList: string[] = JSON.parse(process.env.TARGET_CRYPTO_LIST!);
 
-  const binanceUSDCInfo = binanceInfo[`USDC_USDT`].orderbook;
-  if (binanceUSDCInfo === undefined) {
+  const cexUSDCInfo = cexInfo[`USDC_USDT`].orderbook;
+  if (cexUSDCInfo === undefined) {
     throw new Error(`[Data Fetch Fail] Failed to fetch USDC market Info`);
   }
-  const USDC_USDT_PRICE =
-    (binanceUSDCInfo.asks[0][0] + binanceUSDCInfo.bids[0][0]) / 2;
-
-  const arbitrageDetected: string[][] = [
-    ["crypto", "price_bn", "price_a", "skewness", "aark Prem. (%)"],
-  ];
-  const unhedgedDetected: string[][] = [
-    ["crypto", "pos_bn", "pos_a", "unhedged value ($)"],
-  ];
+  const USDC_USDT_PRICE = (cexUSDCInfo.asks[0][0] + cexUSDCInfo.bids[0][0]) / 2;
 
   for (const crypto of cryptoList) {
-    const binanceMarketInfo = binanceInfo[`${crypto}_USDT`];
-    const aarkMarketInfo = aarkInfo[`${crypto}_USDC`];
+    try {
+      const cexMarketInfo = cexInfo[`${crypto}_USDT`];
+      const aarkMarketInfo = aarkInfo[`${crypto}_USDC`];
 
-    const [
-      bnPosition,
-      bnOrderbook,
-      aarkPosition,
-      aarkMarketStatus,
-      aarkIndexPrice,
-    ]: [Position, Orderbook, Position, IAarkMarketStatus, number] =
-      validateAndReturnData(
-        [
-          binanceMarketInfo.position,
-          binanceMarketInfo.orderbook,
-          aarkMarketInfo.position,
-          aarkMarketInfo.marketStatus,
-          aarkMarketInfo.indexPrice,
-        ],
-        3000
+      const [
+        bnPosition,
+        bnOrderbook,
+        aarkPosition,
+        aarkMarketStatus,
+        aarkIndexPrice,
+      ]: [Position, Orderbook, Position, IAarkMarketStatus, number] =
+        validateAndReturnData(
+          [
+            cexMarketInfo.position,
+            cexMarketInfo.orderbook,
+            aarkMarketInfo.position,
+            aarkMarketInfo.marketStatus,
+            aarkMarketInfo.indexPrice,
+          ],
+          10000
+        );
+
+      const cexMidUSDT = (bnOrderbook.asks[0][0] + bnOrderbook.asks[0][0]) / 2;
+
+      cexActionParams.concat(
+        getHedgeActionParam(
+          crypto,
+          unhedgedDetected,
+          bnPosition,
+          aarkPosition,
+          cexMidUSDT
+        )
       );
 
-    const binanceMidUSDT =
-      (bnOrderbook.asks[0][0] + bnOrderbook.asks[0][0]) / 2;
-
-    const unhedgedSize = bnPosition.size + aarkPosition.size;
-    if (Math.abs(unhedgedSize) * binanceMidUSDT > UNHEDGED_THRESHOLD) {
-      const absAmountToHedge = Math.min(
-        Math.abs(unhedgedSize),
-        MAX_ORDER_USDT / binanceMidUSDT
+      let orderSizeInAark = calcArbAmount(
+        bnOrderbook,
+        aarkMarketStatus,
+        aarkIndexPrice,
+        PRICE_DIFF_THRESHOLD,
+        USDC_USDT_PRICE
       );
-      addCreateMarketParams(binanceActionParams, [
-        {
-          symbol: `${crypto}_USDT`,
-          size: unhedgedSize < 0 ? absAmountToHedge : -absAmountToHedge,
-        },
-      ]);
-      unhedgedDetected.push([
-        crypto,
-        bnPosition.size.toPrecision(4),
-        aarkPosition.size.toPrecision(4),
-        (Math.abs(unhedgedSize) * binanceMidUSDT).toPrecision(4),
-      ]);
+
+      marketSummary.push(
+        getMarketSummary(
+          crypto,
+          cexMarketInfo,
+          aarkMarketInfo,
+          USDC_USDT_PRICE,
+          orderSizeInAark
+        )
+      );
+
+      orderSizeInAark = adjustOrderSize(
+        aarkPosition,
+        orderSizeInAark,
+        MAX_POSITION_USDT / cexMidUSDT,
+        10 / cexMidUSDT // Min order value of cex is typically $5. Set $10 to be more safe
+      );
+
+      if (orderSizeInAark !== 0) {
+        addCreateMarketParams(cexActionParams, [
+          {
+            symbol: `${crypto}_USDT`,
+            size: -orderSizeInAark,
+          },
+        ]);
+        addCreateMarketParams(aarkActionParams, [
+          {
+            symbol: `${crypto}_USDC`,
+            size: orderSizeInAark,
+          },
+        ]);
+      }
+    } catch (e) {
+      console.log(e);
       continue;
-    }
-
-    let orderSizeInAark = calcArbAmount(
-      bnOrderbook,
-      aarkMarketStatus,
-      aarkIndexPrice,
-      PRICE_DIFF_THRESHOLD,
-      USDC_USDT_PRICE
-    );
-    if (orderSizeInAark !== 0) {
-      const bnPrice = binanceMidUSDT / USDC_USDT_PRICE;
-      const aPrice =
-        aarkIndexPrice *
-        (1 + aarkMarketStatus.skewness / aarkMarketStatus.depthFactor / 100);
-      const aarkPremium = aPrice / bnPrice - 1;
-      arbitrageDetected.push([
-        crypto,
-        bnPrice.toPrecision(7),
-        aPrice.toPrecision(7),
-        aarkMarketStatus.skewness.toPrecision(5),
-        (aarkPremium * 100).toPrecision(4),
-      ]);
-    }
-
-    orderSizeInAark = adjustOrderSize(
-      aarkPosition,
-      orderSizeInAark,
-      MAX_POSITION_USDT / binanceMidUSDT,
-      10 / binanceMidUSDT // Min order value of binance is typically $5. Set $10 to be more safe
-    );
-
-    if (orderSizeInAark !== 0) {
-      addCreateMarketParams(binanceActionParams, [
-        {
-          symbol: `${crypto}_USDT`,
-          size: -orderSizeInAark,
-        },
-      ]);
-      addCreateMarketParams(aarkActionParams, [
-        {
-          symbol: `${crypto}_USDC`,
-          size: orderSizeInAark,
-        },
-      ]);
     }
   }
 
-  console.log("------ Unhedged Detected ------");
-  console.log(table(unhedgedDetected));
-  console.log("------ Arbitrage Detected ------");
-  console.log(table(arbitrageDetected));
-
-  // console.log(
-  //   "------ Binance ------\n",
-  //   JSON.stringify(binanceActionParams, null, 2)
-  // );
-  // console.log(
-  //   "------ Aark ------\n",
-  //   JSON.stringify(aarkActionParams, null, 2)
-  // );
+  if (process.env.DEBUG_MODE === "1") {
+    console.log(
+      table(unhedgedDetected, {
+        header: { alignment: "center", content: "Unhedged Market" },
+      })
+    );
+    // console.log("------ Arbitrage Detected ------");
+    // console.log(table(arbitrageDetected));
+    console.log(
+      table(marketSummary, {
+        header: { alignment: "center", content: "Market Summary" },
+      })
+    );
+  }
 
   // await Promise.all([
-  //   binanceService.executeOrders(binanceActionParams),
+  //   cexService.executeOrders(cexActionParams),
   //   aarkService.executeOrders(aarkActionParams),
   // ]);
+}
+
+function getHedgeActionParam(
+  crypto: string,
+  unhedgedDetected: string[][],
+  cexPosition: Position,
+  aarkPosition: Position,
+  midPrice: number
+): IActionParam[] {
+  const hedgeActionParams: IActionParam[] = [];
+  const unhedgedSize = cexPosition.size + aarkPosition.size;
+  if (Math.abs(unhedgedSize) * midPrice > UNHEDGED_THRESHOLD) {
+    const absAmountToHedge = Math.min(
+      Math.abs(unhedgedSize),
+      MAX_ORDER_USDT / midPrice
+    );
+    addCreateMarketParams(hedgeActionParams, [
+      {
+        symbol: `${crypto}_USDT`,
+        size: unhedgedSize < 0 ? absAmountToHedge : -absAmountToHedge,
+      },
+    ]);
+    unhedgedDetected.push([
+      crypto,
+      cexPosition.size.toPrecision(4),
+      aarkPosition.size.toPrecision(4),
+      (Math.abs(unhedgedSize) * midPrice).toPrecision(4),
+    ]);
+  }
+  return hedgeActionParams;
 }
 
 function calcArbAmount(
@@ -187,7 +216,7 @@ function calcArbAmount(
   threshold: number,
   usdcPrice: number
 ): number {
-  // Approximate avg. trade price of binance = last traded binance quote price
+  // Approximate avg. trade price of cex = last traded cex quote price
 
   const depthFactor = Number(aarkMarketStatus.depthFactor);
   const skewness = Number(aarkMarketStatus.skewness);
@@ -214,11 +243,7 @@ function calcArbAmount(
   }
 
   if (orderSizeInAark > 0) {
-    if (aarkMarketStatus.skewness < 0) {
-      return orderSizeInAark;
-    } else {
-      return 0;
-    }
+    return orderSizeInAark;
   }
 
   // Aark Sell
@@ -242,13 +267,34 @@ function calcArbAmount(
     }
   }
 
-  if (orderSizeInAark < 0) {
-    if (aarkMarketStatus.skewness > 0) {
-      return orderSizeInAark;
-    } else {
-      return 0;
-    }
-  }
+  return orderSizeInAark;
+}
 
-  return 0;
+function getMarketSummary(
+  crypto: string,
+  cexMarket: IMarket,
+  aarkMarket: IAarkMarket,
+  usdcPrice: number,
+  sizeInAark: number
+): string[] {
+  const cexMidUSDT =
+    (cexMarket.orderbook!.bids[0][0] + cexMarket.orderbook!.asks[0][0]) / 2;
+  const exchangePremium =
+    (aarkMarket.indexPrice! / (cexMidUSDT / usdcPrice) - 1) * 100;
+  const skewnessPremium =
+    aarkMarket.marketStatus!.skewness / aarkMarket.marketStatus!.depthFactor;
+  const skewnessUSDTValue =
+    aarkMarket.marketStatus!.skewness * aarkMarket.indexPrice!;
+  const fundingRate24h =
+    (aarkMarket.marketStatus!.fundingRatePrice24h / aarkMarket.indexPrice!) *
+    100;
+  const enterValue = sizeInAark * cexMidUSDT;
+  return [
+    crypto,
+    formatNumber(exchangePremium, 4),
+    formatNumber(skewnessPremium, 4),
+    formatNumber(skewnessUSDTValue, 4),
+    formatNumber(fundingRate24h, 4),
+    formatNumber(enterValue, 4),
+  ];
 }

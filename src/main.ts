@@ -3,7 +3,12 @@ import { sleep } from "./utils/time";
 require("dotenv").config();
 
 async function main() {
-  const { strategy } = require(`./strategies/${process.env.STRATEGY}.ts`);
+  const {
+    strategy,
+    initializeStrategy,
+  } = require(`./strategies/${process.env.STRATEGY}.ts`);
+
+  await initializeStrategy();
 
   while (true) {
     try {

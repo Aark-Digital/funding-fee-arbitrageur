@@ -1,11 +1,10 @@
 import { ethers } from "ethers";
 import BigNumber from "bignumber.js";
 import { abi as ContractReader } from "../abis/ContractReader.json";
-import { abi as PriceOracle } from "../abis/PriceOracle.json";
+import { abi as OctRouterABI } from "../abis/OctRouter.json";
 import { abi as FuturesManager } from "../abis/FuturesManager.json";
 import { contractAddressMap } from "../constants/contract-address";
-import { loadTargetMarketSymbols } from "../utils/env";
-import { IAarkMarketInfo } from "../interfaces/market-interface";
+import { IAarkMarket } from "../interfaces/market-interface";
 import {
   ActionType,
   IActionParam,
@@ -34,23 +33,17 @@ const symbolIdMap: { [symbol: string]: string } = {
 export class AarkService {
   private octService: OctService;
   private contractReader: ethers.Contract;
-  private futuresManager: ethers.Contract;
   private symbolList: string[];
-  private marketInfo: { [symbol: string]: IAarkMarketInfo } = {};
+  private markets: { [symbol: string]: IAarkMarket } = {};
   private signer: ethers.Wallet;
   private provider: ethers.providers.AlchemyProvider =
     new ethers.providers.AlchemyProvider(
       "arbitrum",
       process.env.ALCHEMY_API_KEY!
     );
+  private indexPriceUrl: string = process.env.AARK_INDEX_PRICE_URL!;
 
-  constructor(
-    symbolList: string[],
-    signerPk: string,
-    octEpoch?: number,
-    octSeed?: string,
-    isDelegated?: boolean
-  ) {
+  constructor(signerPk: string, symbolList: string[]) {
     this.symbolList = symbolList;
     this.signer = new ethers.Wallet(signerPk, this.provider);
     this.contractReader = new ethers.Contract(
@@ -58,23 +51,23 @@ export class AarkService {
       ContractReader,
       this.signer
     );
-    this.futuresManager = new ethers.Contract(
-      contractAddressMap["futuresManager"],
-      FuturesManager,
-      this.signer
-    );
     this.symbolList.forEach((symbol) => {
-      this.marketInfo[symbol] = {
+      this.markets[symbol] = {
         orderbook: undefined,
         position: undefined,
         openOrders: undefined,
         balance: undefined,
         indexPrice: undefined,
         marketStatus: undefined,
+        marketInfo: { contractSize: 1, pricePrecision: 10, qtyPrecision: 8 },
       };
     });
 
-    this.octService = new OctService(signerPk, octEpoch, octSeed, isDelegated);
+    this.octService = new OctService(signerPk);
+  }
+
+  async init() {
+    await this.octService.init();
   }
 
   getFormattedSymbol(symbol: string) {
@@ -83,7 +76,7 @@ export class AarkService {
   }
 
   getMarketInfo() {
-    return this.marketInfo;
+    return this.markets;
   }
 
   async fetchOrderbooks() {
@@ -109,7 +102,7 @@ export class AarkService {
         const size = Number(
           positions[symbolIdMap[this.getFormattedSymbol(symbol)]]
         );
-        this.marketInfo[symbol].position = {
+        this.markets[symbol].position = {
           symbol,
           timestamp,
           size,
@@ -118,29 +111,27 @@ export class AarkService {
     } catch {
       console.log(`[Aark Service] Failed to fetch Positions`);
       this.symbolList.forEach((symbol: string) => {
-        this.marketInfo[symbol].position = undefined;
+        this.markets[symbol].position = undefined;
       });
     }
   }
 
   async fetchIndexPrices() {
     try {
-      const response = await this.contractReader.getPriceFeeds(
-        this.symbolList.map(
-          (symbol: string) => symbolIdMap[this.getFormattedSymbol(symbol)]
-        )
-      );
-      const prices = response.map((price: any) =>
-        Number(new BigNumber(price.toString()).dividedBy(1e8).toFixed())
-      );
-
-      this.symbolList.forEach((symbol: any, idx: number) => {
-        this.marketInfo[symbol].indexPrice = prices[idx];
+      const priceResponse = await axios.get(this.indexPriceUrl, {
+        params: {
+          symbols: this.symbolList
+            .map((symbol: string) => this.getFormattedSymbol(symbol))
+            .join(","),
+        },
+      });
+      this.symbolList.forEach((symbol: string, idx: number) => {
+        this.markets[symbol].indexPrice = priceResponse.data[idx].indexPrice;
       });
     } catch (e) {
       console.log(`[Aark Service] Failed to fetch index prices: ${e}`);
       this.symbolList.forEach((symbol: string) => {
-        this.marketInfo[symbol].indexPrice = undefined;
+        this.markets[symbol].indexPrice = undefined;
       });
     }
   }
@@ -150,7 +141,13 @@ export class AarkService {
       const response = await this.contractReader.getMarkets();
       this.symbolList.forEach((symbol: string) => {
         const rawData = response[symbolIdMap[this.getFormattedSymbol(symbol)]];
-        this.marketInfo[symbol].marketStatus = {
+        this.markets[symbol].marketStatus = {
+          fundingRatePrice24h: Number(
+            new BigNumber(rawData[1].toString())
+              .dividedBy(1e18)
+              .multipliedBy(86400)
+              .toFixed()
+          ),
           skewness: Number(
             new BigNumber(rawData[2].toString()).dividedBy(1e10).toFixed()
           ),
@@ -168,7 +165,7 @@ export class AarkService {
     } catch (e) {
       console.log(`[Aark Service] Failed to fetch market statuses: ${e}`);
       this.symbolList.forEach((symbol: string) => {
-        this.marketInfo[symbol].marketStatus = undefined;
+        this.markets[symbol].marketStatus = undefined;
       });
     }
   }
@@ -183,6 +180,13 @@ export class AarkService {
     const limitOrderParams = actionParams
       .filter((param: IActionParam) => param.type === ActionType.CreateLimit)
       .map((param: IActionParam) => param.order) as ILimitOrderParam[];
+
+    // ONLY MARKET ORDER IS AVAILABLE
+    if (cancelParams.length * limitOrderParams.length !== 0) {
+      throw new Error(
+        "LimtOrder & CancelOrder are not implemented in AarkService"
+      );
+    }
 
     for (const param of marketOrderParams) {
       await this.octService.octOrder(
@@ -200,31 +204,49 @@ export class OctService {
   private readonly PRICE_DECIMALS = 8;
   private readonly QTY_DECIMALS = 10;
   private _wallet: ethers.Wallet;
-  private isDelegated: boolean;
   private delegateePkInfo: {
     epoch: number;
-    seed: string;
+    pk: string;
+  } = {
+    epoch: -1,
+    pk: "",
   };
 
-  constructor(
-    signer_pk: string,
-    epoch?: number,
-    seed?: string,
-    isDelegated?: boolean
-  ) {
-    this._wallet = new ethers.Wallet(signer_pk);
-    if (epoch === undefined || seed === undefined) {
-      this.delegateePkInfo = {
-        epoch: -1,
-        seed: "",
-      };
-      this.isDelegated = false;
+  constructor(signer_pk: string) {
+    this._wallet = new ethers.Wallet(
+      signer_pk,
+      new ethers.providers.AlchemyProvider(
+        "arbitrum",
+        process.env.ALCHEMY_API_KEY!
+      )
+    );
+  }
+
+  async init() {
+    const provider = new ethers.providers.AlchemyProvider(
+      "arbitrum",
+      process.env.ALCHEMY_API_KEY!
+    );
+    const octRouter = new ethers.Contract(
+      contractAddressMap["octRouter"],
+      OctRouterABI,
+      this._wallet
+    );
+    const seedInfo = this._getSeed();
+
+    const registeredDelegatee = await octRouter.delegatees(
+      seedInfo.epoch,
+      this._wallet.address
+    );
+    const signature = await this._wallet.signMessage(seedInfo.seed);
+    const delegateePk = `${ethers.utils.keccak256(signature)}`;
+    const delegateeWallet = new ethers.Wallet(delegateePk, provider);
+
+    if (registeredDelegatee !== delegateeWallet.address) {
+      await this.delegate();
     } else {
-      this.delegateePkInfo = {
-        epoch,
-        seed,
-      };
-      this.isDelegated = isDelegated === undefined ? false : isDelegated;
+      this.delegateePkInfo.epoch = seedInfo.epoch;
+      this.delegateePkInfo.pk = delegateePk;
     }
   }
 
@@ -238,9 +260,6 @@ export class OctService {
     isReduceOnly_: boolean = false
   ) {
     const delegateeWallet = new ethers.Wallet(await this._getDelegateePK());
-    if (!this.isDelegated) {
-      await this.delegate();
-    }
     const nonce = Date.now();
 
     const orderObject = this._getFuturesOrderObject(
@@ -287,6 +306,7 @@ export class OctService {
   }
 
   async delegate() {
+    console.log("DO NOT CALL ME");
     const delegateeWallet = new ethers.Wallet(await this._getDelegateePK());
     const nonce = Date.now();
 
@@ -299,8 +319,8 @@ export class OctService {
     const msgHashBinary = ethers.utils.arrayify(hashMsg);
 
     const signature = await this._wallet.signMessage(msgHashBinary);
-
-    const res = await axios.post(
+    console.log(`--- Deleagation Ocurred---`);
+    await axios.post(
       `${process.env.OCT_BACKEND_URL}/oct/delegate`,
       {
         delegator: this._wallet.address,
@@ -318,10 +338,9 @@ export class OctService {
   private async _getDelegateePK() {
     const seedInfo = this._getSeed();
     if (this.delegateePkInfo.epoch != seedInfo.epoch) {
+      const signature = await this._wallet.signMessage(seedInfo.seed);
       this.delegateePkInfo.epoch = seedInfo.epoch;
-      // this.delegateePkInfo.seed = `${ethers.utils.keccak256(signature)}`;
-      // this.delegateePkInfo.seed = `${ethers.utils.keccak256(signature)}`;
-      this.isDelegated = false;
+      this.delegateePkInfo.pk = `${ethers.utils.keccak256(signature)}`;
     }
     const signature = await this._wallet.signMessage(seedInfo.seed);
     return `${ethers.utils.keccak256(signature)}`;
