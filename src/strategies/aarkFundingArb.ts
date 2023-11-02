@@ -9,8 +9,14 @@ import { AarkService } from "../services/aark.service";
 import { BinanceService } from "../services/binance.service";
 import { OkxSwapService } from "../services/okx.service";
 import { loadTargetMarketSymbols } from "../utils/env";
+import { logActionParams } from "../utils/logger";
 import { formatNumber } from "../utils/number";
-import { addCreateMarketParams, adjustOrderSize } from "../utils/order";
+import {
+  addCreateMarketParams,
+  adjustOrderSize,
+  applyQtyPrecision,
+  clampOrderSize,
+} from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
 import { table } from "table";
 
@@ -35,11 +41,15 @@ const [
   MAX_POSITION_USDT,
   UNHEDGED_THRESHOLD,
   MAX_ORDER_USDT,
+  MIN_ORDER_USDT,
+  DEFAULT_GAS_FEE_USDT,
 ] = [
   process.env.PRICE_DIFF_THRESHOLD!,
   process.env.MAX_POSITION_USDT!,
   process.env.UNHEDGED_THRESHOLD!,
   process.env.MAX_ORDER_USDT!,
+  process.env.MIN_ORDER_USDT!,
+  process.env.DEFAULT_GAS_FEE_USDT!,
 ].map((param: string) => parseFloat(param));
 
 export async function initializeStrategy() {
@@ -103,15 +113,17 @@ export async function strategy() {
 
       const cexMidUSDT = (bnOrderbook.asks[0][0] + bnOrderbook.asks[0][0]) / 2;
 
-      cexActionParams.concat(
-        getHedgeActionParam(
-          crypto,
-          unhedgedDetected,
-          bnPosition,
-          aarkPosition,
-          cexMidUSDT
-        )
+      const hedgeActionParams = getHedgeActionParam(
+        crypto,
+        unhedgedDetected,
+        bnPosition,
+        aarkPosition,
+        cexMidUSDT
       );
+      if (hedgeActionParams.length !== 0) {
+        cexActionParams.concat(hedgeActionParams);
+        continue;
+      }
 
       let orderSizeInAark = calcArbAmount(
         bnOrderbook,
@@ -131,12 +143,30 @@ export async function strategy() {
         )
       );
 
-      orderSizeInAark = adjustOrderSize(
-        aarkPosition,
-        orderSizeInAark,
-        MAX_POSITION_USDT / cexMidUSDT,
-        10 / cexMidUSDT // Min order value of cex is typically $5. Set $10 to be more safe
-      );
+      if (orderSizeInAark > 0) {
+        orderSizeInAark = Math.min(
+          orderSizeInAark,
+          MAX_ORDER_USDT / cexMidUSDT,
+          MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
+          Math.max(-aarkMarketStatus.skewness, 0)
+        );
+      } else {
+        orderSizeInAark = Math.max(
+          orderSizeInAark,
+          -MAX_ORDER_USDT / cexMidUSDT,
+          -MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
+          Math.min(-aarkMarketStatus.skewness, 0)
+        );
+      }
+
+      orderSizeInAark = applyQtyPrecision(orderSizeInAark, [
+        cexMarketInfo.marketInfo,
+        aarkMarketInfo.marketInfo,
+      ]);
+
+      if (orderSizeInAark * cexMidUSDT < MIN_ORDER_USDT) {
+        orderSizeInAark = 0;
+      }
 
       if (orderSizeInAark !== 0) {
         addCreateMarketParams(cexActionParams, [
@@ -173,10 +203,13 @@ export async function strategy() {
     );
   }
 
-  // await Promise.all([
-  //   cexService.executeOrders(cexActionParams),
-  //   aarkService.executeOrders(aarkActionParams),
-  // ]);
+  logActionParams(cexActionParams);
+  logActionParams(aarkActionParams);
+
+  await Promise.all([
+    cexService.executeOrders(cexActionParams),
+    aarkService.executeOrders(aarkActionParams),
+  ]);
 }
 
 function getHedgeActionParam(

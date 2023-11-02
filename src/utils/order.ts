@@ -1,4 +1,5 @@
 import { OpenOrder, Position } from "../interfaces/basic-interface";
+import { IMarketInfo } from "../interfaces/market-interface";
 import {
   ActionType,
   ICancelOrderParam,
@@ -7,6 +8,11 @@ import {
   Side,
 } from "../interfaces/order-interface";
 import { IActionParam } from "../interfaces/order-interface";
+import {
+  convertSizeToContractAmount,
+  floor_dp,
+  numberToPrecision,
+} from "./number";
 
 export function addCreateLimitParams(
   actionParams: IActionParam[],
@@ -90,6 +96,14 @@ export function getActionParamsFromTargetOrder(
   }
 }
 
+export function clampOrderSize(n: number, min: number, max: number) {
+  if (min > max) {
+    return 0;
+  } else {
+    return Math.min(Math.max(n, min), max);
+  }
+}
+
 export function adjustOrderSize(
   position: Position,
   orderSize: number,
@@ -103,4 +117,21 @@ export function adjustOrderSize(
     size = Math.max(-maxPosQty - position.size, orderSize);
   }
   return Math.abs(size) < minOrderQty ? 0 : size;
+}
+
+export function applyQtyPrecision(
+  orderSize: number,
+  marketInfos: IMarketInfo[]
+): number {
+  let result = Math.abs(orderSize);
+  let minQtyPrecision = 100;
+  for (const marketInfo of marketInfos) {
+    const qtyPrecision = marketInfo.qtyPrecision;
+    const contractSizePrecision = numberToPrecision(marketInfo.contractSize);
+    if (qtyPrecision + contractSizePrecision < minQtyPrecision) {
+      minQtyPrecision = qtyPrecision + contractSizePrecision;
+      result = floor_dp(result, minQtyPrecision); // Use floor instead round
+    }
+  }
+  return orderSize > 0 ? result : -result;
 }

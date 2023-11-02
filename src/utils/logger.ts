@@ -1,3 +1,5 @@
+import { IActionParam } from "../interfaces/order-interface";
+
 export function logUnhedged(
   symbol: string,
   aarkPositionAmount: number,
@@ -33,4 +35,11 @@ export function logArbitrage(
   Price Ratio          : ${(binancePrice / aarkMarketMP - 1).toFixed(6)}
   Order Amount in AARK : ${amountInAark.toFixed(6)}
       `);
+}
+
+export function logActionParams(actionParams: IActionParam[]) {
+  // for (const actionParam of actionParams) {
+  //   console.log(JSON.stringify(actionParam.order));
+  // }
+  console.log(JSON.stringify(actionParams.map((ap: IActionParam) => ap.order)));
 }
