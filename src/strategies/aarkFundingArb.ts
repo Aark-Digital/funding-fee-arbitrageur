@@ -3,9 +3,11 @@ import {
   IAarkMarket,
   IAarkMarketStatus,
   IMarket,
+  IMarketInfo,
 } from "../interfaces/market-interface";
 import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
+import { SlackMonitoringService } from "../monitorings/slack.monitor";
 import { BinanceService } from "../services/binance.service";
 import { OkxSwapService } from "../services/okx.service";
 import { loadTargetMarketSymbols } from "../utils/env";
@@ -19,6 +21,16 @@ import {
 } from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
 import { table } from "table";
+
+interface IArbSnapshot {
+  crypto: string;
+  orderSizeInAark: number;
+  bestAsk: [number, number];
+  bestBid: [number, number];
+  usdcUsdtPrice: number;
+  aarkIndexPrice: number;
+  aarkMarketSkewness: number;
+}
 
 const cexService = new OkxSwapService(
   process.env.OKX_API_KEY!,
@@ -36,6 +48,11 @@ const aarkService = new AarkService(
   )
 );
 
+const slackMonitoringService = new SlackMonitoringService(
+  process.env.SLACK_URL!,
+  60
+);
+
 const [
   PRICE_DIFF_THRESHOLD,
   MAX_POSITION_USDT,
@@ -51,6 +68,7 @@ const [
   process.env.MIN_ORDER_USDT!,
   process.env.DEFAULT_GAS_FEE_USDT!,
 ].map((param: string) => parseFloat(param));
+const MANAGER_SLACK_ID = process.env.MANAGER_SLACK_ID!;
 
 export async function initializeStrategy() {
   await cexService.init();
@@ -60,22 +78,23 @@ export async function initializeStrategy() {
 export async function strategy() {
   const cexActionParams: IActionParam[] = [];
   const aarkActionParams: IActionParam[] = [];
-  const arbitrageDetected: string[][] = [
-    ["crypto", "price_bn", "price_a", "skewness", "aark Prem. (%)"],
-  ];
   const marketSummary: string[][] = [
     ["crypto", "Pm_ex%", "Pm_skew%", "$Skew", "Fr24h%", "$avl.Value"],
   ];
   const unhedgedDetected: string[][] = [
     ["crypto", "pos_bn", "pos_a", "unhedged value ($)"],
   ];
+  const arbSnapshot: IArbSnapshot[] = [];
+
+  await Promise.all([
+    aarkService.fetchIndexPrices(),
+    aarkService.fetchPositions(),
+    aarkService.fetchMarketStatuses(),
+  ]);
   await Promise.all([
     cexService.fetchOpenOrders(),
     cexService.fetchPositions(),
     cexService.fetchOrderbooks(),
-    aarkService.fetchIndexPrices(),
-    aarkService.fetchPositions(),
-    aarkService.fetchMarketStatuses(),
   ]);
 
   const cexInfo = cexService.getMarketInfo();
@@ -127,6 +146,7 @@ export async function strategy() {
 
       let orderSizeInAark = calcArbAmount(
         bnOrderbook,
+        cexMarketInfo.marketInfo,
         aarkMarketStatus,
         aarkIndexPrice,
         PRICE_DIFF_THRESHOLD,
@@ -169,6 +189,15 @@ export async function strategy() {
       }
 
       if (orderSizeInAark !== 0) {
+        arbSnapshot.push({
+          crypto,
+          orderSizeInAark,
+          bestAsk: bnOrderbook.asks[0],
+          bestBid: bnOrderbook.bids[0],
+          usdcUsdtPrice: USDC_USDT_PRICE,
+          aarkIndexPrice,
+          aarkMarketSkewness: aarkMarketStatus.skewness,
+        });
         addCreateMarketParams(cexActionParams, [
           {
             symbol: `${crypto}_USDT`,
@@ -194,8 +223,6 @@ export async function strategy() {
         header: { alignment: "center", content: "Unhedged Market" },
       })
     );
-    // console.log("------ Arbitrage Detected ------");
-    // console.log(table(arbitrageDetected));
     console.log(
       table(marketSummary, {
         header: { alignment: "center", content: "Market Summary" },
@@ -209,6 +236,15 @@ export async function strategy() {
   await Promise.all([
     cexService.executeOrders(cexActionParams),
     aarkService.executeOrders(aarkActionParams),
+  ]);
+
+  await Promise.all([
+    logOrderInfoToSlack(
+      cexActionParams,
+      aarkActionParams,
+      arbSnapshot,
+      MANAGER_SLACK_ID
+    ),
   ]);
 }
 
@@ -244,6 +280,7 @@ function getHedgeActionParam(
 
 function calcArbAmount(
   bnOrderbook: Orderbook,
+  bnMarketInfo: IMarketInfo,
   aarkMarketStatus: IAarkMarketStatus,
   aarkIndexPrice: number,
   threshold: number,
@@ -258,7 +295,7 @@ function calcArbAmount(
   let orderSizeInAark = 0;
   for (const [p, q] of bnOrderbook.bids) {
     const deltaAmount = Math.min(
-      q,
+      q * bnMarketInfo.contractSize,
       2 *
         (100 *
           depthFactor *
@@ -282,7 +319,7 @@ function calcArbAmount(
   // Aark Sell
   for (const [p, q] of bnOrderbook.asks) {
     const deltaAmount = Math.min(
-      q,
+      q * bnMarketInfo.contractSize,
       2 *
         (-100 *
           depthFactor *
@@ -330,4 +367,22 @@ function getMarketSummary(
     formatNumber(fundingRate24h, 4),
     formatNumber(enterValue, 4),
   ];
+}
+
+async function logOrderInfoToSlack(
+  cexActionParams: IActionParam[],
+  aarkActionParams: IActionParam[],
+  arbSnapshot: IArbSnapshot[],
+  manager: string
+) {
+  if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
+    await slackMonitoringService.send(
+      "Arbitrage Detected",
+      `<@${manager}>\n*CEX*\n${JSON.stringify(
+        cexActionParams
+      )}\n*AARK*\n${JSON.stringify(
+        aarkActionParams
+      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`
+    );
+  }
 }
