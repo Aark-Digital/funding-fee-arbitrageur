@@ -12,6 +12,7 @@
     "axios": "^1.6.0",
     "bignumber.js": "^9.1.2",
     "ccxt": "^4.1.24",
+    "csv-writer": "^1.6.0",
     "dotenv": "^16.0.1",
     "ethers": "^5.7.0",
     "prando": "^6.0.1",
