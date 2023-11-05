@@ -1,7 +1,7 @@
 import { IMessage } from "../interfaces/message-interface";
 import axios from "axios";
 
-class slackMonitoringService {
+export class SlackMonitoringService {
   private slackUrl: string;
   private lastMessage: IMessage;
   private messageInterval: number;
@@ -15,14 +15,14 @@ class slackMonitoringService {
     this.messageInterval = messageInterval;
   }
 
-  _setLastMessage(topic: string, timestamp: number) {
+  private _setLastMessage(topic: string, timestamp: number) {
     this.lastMessage = { topic, timestamp };
   }
 
-  _isSentRecently(topic: string, timestamp: number): boolean {
+  private _isSentRecently(topic: string, timestamp: number): boolean {
     return (
       this.lastMessage.topic === topic &&
-      this.lastMessage.timestamp < timestamp - this.messageInterval
+      this.lastMessage.timestamp > timestamp - this.messageInterval
     );
   }
 
