@@ -44,7 +44,7 @@ export class MonitorService {
     const text =
       (tagManager ? `<@${this.slackParam.managerSlackId}> ` : "") +
       `*${new Date().toISOString()}*\n` +
-      `[${topic}] : ${desc}`;
+      `[${topic}]\n${desc}`;
     if (call) {
       this._twilioCall();
     }
