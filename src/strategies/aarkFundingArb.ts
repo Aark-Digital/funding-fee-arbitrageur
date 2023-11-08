@@ -62,16 +62,15 @@ const [
   UNHEDGED_THRESHOLD,
   MAX_ORDER_USDT,
   MIN_ORDER_USDT,
-  DEFAULT_GAS_FEE_USDT,
+  IGNORE_SKEWNESS,
 ] = [
   process.env.PRICE_DIFF_THRESHOLD!,
   process.env.MAX_POSITION_USDT!,
   process.env.UNHEDGED_THRESHOLD!,
   process.env.MAX_ORDER_USDT!,
   process.env.MIN_ORDER_USDT!,
-  process.env.DEFAULT_GAS_FEE_USDT!,
+  process.env.IGNORE_SKEWNESS!,
 ].map((param: string) => parseFloat(param));
-const MANAGER_SLACK_ID = process.env.MANAGER_SLACK_ID;
 
 export async function initializeStrategy() {
   await cexService.init();
@@ -132,7 +131,6 @@ export async function strategy() {
         );
 
       const cexMidUSDT = (bnOrderbook.asks[0][0] + bnOrderbook.asks[0][0]) / 2;
-
       const hedgeActionParams = getHedgeActionParam(
         crypto,
         unhedgedDetected,
@@ -170,26 +168,23 @@ export async function strategy() {
           orderSizeInAark,
           MAX_ORDER_USDT / cexMidUSDT,
           MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
-          Math.max(-aarkMarketStatus.skewness, 0)
+          IGNORE_SKEWNESS ? Infinity : Math.max(-aarkMarketStatus.skewness, 0)
         );
       } else {
         orderSizeInAark = Math.max(
           orderSizeInAark,
           -MAX_ORDER_USDT / cexMidUSDT,
           -MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
-          Math.min(-aarkMarketStatus.skewness, 0)
+          IGNORE_SKEWNESS ? -Infinity : Math.min(-aarkMarketStatus.skewness, 0)
         );
       }
-
       orderSizeInAark = applyQtyPrecision(orderSizeInAark, [
         cexMarketInfo.marketInfo,
         aarkMarketInfo.marketInfo,
       ]);
-
-      if (orderSizeInAark * cexMidUSDT < MIN_ORDER_USDT) {
+      if (Math.abs(orderSizeInAark) * cexMidUSDT < MIN_ORDER_USDT) {
         orderSizeInAark = 0;
       }
-
       if (orderSizeInAark !== 0) {
         arbSnapshot.push({
           timestamp: new Date().getTime(),
@@ -253,9 +248,7 @@ export async function strategy() {
     aarkService.executeOrders(aarkActionParams),
   ]);
 
-  await Promise.all([
-    logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot),
-  ]);
+  await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
 }
 
 function getHedgeActionParam(
@@ -385,11 +378,18 @@ async function logOrderInfoToSlack(
   arbSnapshot: IArbSnapshot[]
 ) {
   if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
-    await monitorService.slackMessage(
-      "Arbitrage Detected",
-      `Information : \n*CEX*\n${JSON.stringify(
+    const cryptoList = Array.from(
+      new Set(
         cexActionParams
-      )}\n*AARK*\n${JSON.stringify(
+          .concat(aarkActionParams)
+          .map((ap) => ap.symbol.split("_")[0])
+      )
+    ).join(",");
+    await monitorService.slackMessage(
+      `Arbitrage Detected : ${cryptoList}`,
+      `\n*CEX ORDER*\n${JSON.stringify(
+        cexActionParams
+      )}\n*AARK ORDER*\n${JSON.stringify(
         aarkActionParams
       )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`
     );
