@@ -108,8 +108,12 @@ export class OkxSwapService {
         const ob = orderbooks[idx].data[0];
         this.markets[symbol].orderbook = {
           symbol: symbol,
-          bids: ob.bids.map((bid: any) => [Number(bid[0]), Number(bid[1])]),
-          asks: ob.bids.map((ask: any) => [Number(ask[0]), Number(ask[1])]),
+          bids: ob.bids
+            .map((bid: any) => [Number(bid[0]), Number(bid[1])])
+            .sort((x: [number, number], y: [number, number]) => y[0] - x[0]),
+          asks: ob.asks
+            .map((ask: any) => [Number(ask[0]), Number(ask[1])])
+            .sort((x: [number, number], y: [number, number]) => x[0] - y[0]),
           timestamp: Number(ob.ts),
         };
       });
