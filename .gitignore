@@ -4,3 +4,5 @@ src/scripts
 *.env
 *.yaml
 *.log
+
+dist
