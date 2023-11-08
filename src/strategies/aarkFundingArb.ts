@@ -7,10 +7,7 @@ import {
 } from "../interfaces/market-interface";
 import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
-import { SlackMonitoringService } from "../monitorings/slack.monitor";
-import { BinanceService } from "../services/binance.service";
 import { OkxSwapService } from "../services/okx.service";
-import { loadTargetMarketSymbols } from "../utils/env";
 import { logActionParams } from "../utils/logger";
 import { formatNumber } from "../utils/number";
 import {
@@ -21,8 +18,10 @@ import {
 } from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
 import { table } from "table";
+import { MonitorService } from "../services/monitor.service";
 
 interface IArbSnapshot {
+  timestamp: number;
   crypto: string;
   orderSizeInAark: number;
   bestAsk: [number, number];
@@ -31,6 +30,10 @@ interface IArbSnapshot {
   aarkIndexPrice: number;
   aarkMarketSkewness: number;
 }
+
+const LOCAL_STATE: { [key: string]: any } = {
+  unhedgedCnt: 0,
+};
 
 const cexService = new OkxSwapService(
   process.env.OKX_API_KEY!,
@@ -42,15 +45,15 @@ const cexService = new OkxSwapService(
 );
 
 const aarkService = new AarkService(
-  process.env.SIGNER_PK!,
+  process.env.ARBITRAGEUR_PK!,
   JSON.parse(process.env.TARGET_CRYPTO_LIST!).map(
     (symbol: string) => `${symbol}_USDC`
   )
 );
 
-const slackMonitoringService = new SlackMonitoringService(
-  process.env.SLACK_URL!,
-  60
+const monitorService = new MonitorService(
+  process.env.TWILIO_PARAM ? JSON.parse(process.env.TWILIO_PARAM) : undefined,
+  process.env.SLACK_PARAM ? JSON.parse(process.env.SLACK_PARAM) : undefined
 );
 
 const [
@@ -68,7 +71,7 @@ const [
   process.env.MIN_ORDER_USDT!,
   process.env.DEFAULT_GAS_FEE_USDT!,
 ].map((param: string) => parseFloat(param));
-const MANAGER_SLACK_ID = process.env.MANAGER_SLACK_ID!;
+const MANAGER_SLACK_ID = process.env.MANAGER_SLACK_ID;
 
 export async function initializeStrategy() {
   await cexService.init();
@@ -90,8 +93,6 @@ export async function strategy() {
     aarkService.fetchIndexPrices(),
     aarkService.fetchPositions(),
     aarkService.fetchMarketStatuses(),
-  ]);
-  await Promise.all([
     cexService.fetchOpenOrders(),
     cexService.fetchPositions(),
     cexService.fetchOrderbooks(),
@@ -106,7 +107,7 @@ export async function strategy() {
     throw new Error(`[Data Fetch Fail] Failed to fetch USDC market Info`);
   }
   const USDC_USDT_PRICE = (cexUSDCInfo.asks[0][0] + cexUSDCInfo.bids[0][0]) / 2;
-
+  let hedged = true;
   for (const crypto of cryptoList) {
     try {
       const cexMarketInfo = cexInfo[`${crypto}_USDT`];
@@ -140,7 +141,8 @@ export async function strategy() {
         cexMidUSDT
       );
       if (hedgeActionParams.length !== 0) {
-        cexActionParams.concat(hedgeActionParams);
+        hedged = false;
+        cexActionParams.push(...hedgeActionParams);
         continue;
       }
 
@@ -190,6 +192,7 @@ export async function strategy() {
 
       if (orderSizeInAark !== 0) {
         arbSnapshot.push({
+          timestamp: new Date().getTime(),
           crypto,
           orderSizeInAark,
           bestAsk: bnOrderbook.asks[0],
@@ -230,6 +233,18 @@ export async function strategy() {
     );
   }
 
+  if (!hedged) {
+    LOCAL_STATE.unhedgedCnt += 1;
+    if (LOCAL_STATE.unhedgedCnt >= 10) {
+      await monitorService.slackMessage(
+        `ARBITRAGEUR UNHEDGED`,
+        `Unhedged for ${LOCAL_STATE.unhedgedCnt} iteration`,
+        true,
+        true
+      );
+    }
+  }
+
   logActionParams(cexActionParams);
   logActionParams(aarkActionParams);
 
@@ -239,12 +254,7 @@ export async function strategy() {
   ]);
 
   await Promise.all([
-    logOrderInfoToSlack(
-      cexActionParams,
-      aarkActionParams,
-      arbSnapshot,
-      MANAGER_SLACK_ID
-    ),
+    logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot),
   ]);
 }
 
@@ -258,14 +268,14 @@ function getHedgeActionParam(
   const hedgeActionParams: IActionParam[] = [];
   const unhedgedSize = cexPosition.size + aarkPosition.size;
   if (Math.abs(unhedgedSize) * midPrice > UNHEDGED_THRESHOLD) {
-    const absAmountToHedge = Math.min(
+    const absSizeToHedge = Math.min(
       Math.abs(unhedgedSize),
       MAX_ORDER_USDT / midPrice
     );
     addCreateMarketParams(hedgeActionParams, [
       {
         symbol: `${crypto}_USDT`,
-        size: unhedgedSize < 0 ? absAmountToHedge : -absAmountToHedge,
+        size: unhedgedSize < 0 ? absSizeToHedge : -absSizeToHedge,
       },
     ]);
     unhedgedDetected.push([
@@ -372,13 +382,12 @@ function getMarketSummary(
 async function logOrderInfoToSlack(
   cexActionParams: IActionParam[],
   aarkActionParams: IActionParam[],
-  arbSnapshot: IArbSnapshot[],
-  manager: string
+  arbSnapshot: IArbSnapshot[]
 ) {
   if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
-    await slackMonitoringService.send(
+    await monitorService.slackMessage(
       "Arbitrage Detected",
-      `<@${manager}>\n*CEX*\n${JSON.stringify(
+      `Information : \n*CEX*\n${JSON.stringify(
         cexActionParams
       )}\n*AARK*\n${JSON.stringify(
         aarkActionParams

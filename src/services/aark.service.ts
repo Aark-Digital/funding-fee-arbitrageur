@@ -306,7 +306,6 @@ export class OctService {
   }
 
   async delegate() {
-    console.log("DO NOT CALL ME");
     const delegateeWallet = new ethers.Wallet(await this._getDelegateePK());
     const nonce = Date.now();
 

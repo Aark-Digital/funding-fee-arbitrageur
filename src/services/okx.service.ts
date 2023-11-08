@@ -206,9 +206,13 @@ export class OkxSwapService {
       .filter((param: IActionParam) => param.type === ActionType.CreateLimit)
       .map((param: IActionParam) => param.order) as ILimitOrderParam[];
 
-    await Promise.all(cancelParams.map(this._cancelOrder));
-    await Promise.all(marketOrderParams.map(this._createMarketOrder));
-    await Promise.all(limitOrderParams.map(this._createLimitOrder));
+    await Promise.all(cancelParams.map((param) => this._cancelOrder(param)));
+    await Promise.all(
+      marketOrderParams.map((param) => this._createMarketOrder(param))
+    );
+    await Promise.all(
+      limitOrderParams.map((param) => this._createLimitOrder(param))
+    );
   }
 
   private async _createMarketOrder(param: IMarketOrderParam) {
