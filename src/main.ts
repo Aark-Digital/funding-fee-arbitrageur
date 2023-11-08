@@ -3,6 +3,18 @@ import { sleep } from "./utils/time";
 require("dotenv").config();
 
 async function main() {
+  const express = require("express");
+  const healthCheckApp = express();
+  const port = 3000;
+
+  healthCheckApp.get("/", (req: any, res: any) => {
+    res.send("HEALTHY");
+  });
+
+  healthCheckApp.listen(port, () => {
+    console.log(`Health check app listening on port ${port}`);
+  });
+
   const {
     strategy,
     initializeStrategy,
