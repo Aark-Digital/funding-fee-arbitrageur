@@ -18,7 +18,7 @@ async function main() {
   const {
     strategy,
     initializeStrategy,
-  } = require(`./strategies/${process.env.STRATEGY}.ts`);
+  } = require(`./strategies/${process.env.STRATEGY}`);
 
   await initializeStrategy();
 
