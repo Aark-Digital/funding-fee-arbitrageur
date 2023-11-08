@@ -84,7 +84,7 @@ export async function strategy() {
     ["crypto", "Pm_ex%", "Pm_skew%", "$Skew", "Fr24h%", "$avl.Value"],
   ];
   const unhedgedDetected: string[][] = [
-    ["crypto", "pos_bn", "pos_a", "unhedged value ($)"],
+    ["crypto", "pos_cex", "pos_a", "unhedged value ($)"],
   ];
   const arbSnapshot: IArbSnapshot[] = [];
 
@@ -113,8 +113,8 @@ export async function strategy() {
       const aarkMarketInfo = aarkInfo[`${crypto}_USDC`];
 
       const [
-        bnPosition,
-        bnOrderbook,
+        cexPosition,
+        cexOrderbook,
         aarkPosition,
         aarkMarketStatus,
         aarkIndexPrice,
@@ -130,11 +130,12 @@ export async function strategy() {
           10000
         );
 
-      const cexMidUSDT = (bnOrderbook.asks[0][0] + bnOrderbook.asks[0][0]) / 2;
+      const cexMidUSDT =
+        (cexOrderbook.asks[0][0] + cexOrderbook.asks[0][0]) / 2;
       const hedgeActionParams = getHedgeActionParam(
         crypto,
         unhedgedDetected,
-        bnPosition,
+        cexPosition,
         aarkPosition,
         cexMidUSDT
       );
@@ -145,7 +146,7 @@ export async function strategy() {
       }
 
       let orderSizeInAark = calcArbAmount(
-        bnOrderbook,
+        cexOrderbook,
         cexMarketInfo.marketInfo,
         aarkMarketStatus,
         aarkIndexPrice,
@@ -190,8 +191,8 @@ export async function strategy() {
           timestamp: new Date().getTime(),
           crypto,
           orderSizeInAark,
-          bestAsk: bnOrderbook.asks[0],
-          bestBid: bnOrderbook.bids[0],
+          bestAsk: cexOrderbook.asks[0],
+          bestBid: cexOrderbook.bids[0],
           usdcUsdtPrice: USDC_USDT_PRICE,
           aarkIndexPrice,
           aarkMarketSkewness: aarkMarketStatus.skewness,
@@ -282,8 +283,8 @@ function getHedgeActionParam(
 }
 
 function calcArbAmount(
-  bnOrderbook: Orderbook,
-  bnMarketInfo: IMarketInfo,
+  cexOrderbook: Orderbook,
+  cexMarketInfo: IMarketInfo,
   aarkMarketStatus: IAarkMarketStatus,
   aarkIndexPrice: number,
   threshold: number,
@@ -296,9 +297,9 @@ function calcArbAmount(
 
   // Aark Buy
   let orderSizeInAark = 0;
-  for (const [p, q] of bnOrderbook.bids) {
+  for (const [p, q] of cexOrderbook.bids) {
     const deltaAmount = Math.min(
-      q * bnMarketInfo.contractSize,
+      q * cexMarketInfo.contractSize,
       2 *
         (100 *
           depthFactor *
@@ -320,9 +321,9 @@ function calcArbAmount(
   }
 
   // Aark Sell
-  for (const [p, q] of bnOrderbook.asks) {
+  for (const [p, q] of cexOrderbook.asks) {
     const deltaAmount = Math.min(
-      q * bnMarketInfo.contractSize,
+      q * cexMarketInfo.contractSize,
       2 *
         (-100 *
           depthFactor *
