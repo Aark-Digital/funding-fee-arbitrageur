@@ -17,7 +17,8 @@ export interface Orderbook {
 export interface Balance {
   timestamp: number;
   currency: string;
-  balance: number;
+  total: number;
+  available: number;
 }
 
 export interface OpenOrder {
