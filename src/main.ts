@@ -15,6 +15,12 @@ async function main() {
     console.log(`Health check app listening on port ${port}`);
   });
 
+  console.log(
+    process.env.PRICE_URL!,
+    process.env.OCT_BACKEND_URL!,
+    process.env.AARK_INDEX_PRICE_URL!
+  );
+
   const {
     strategy,
     initializeStrategy,
