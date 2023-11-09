@@ -391,7 +391,7 @@ async function logOrderInfoToSlack(
       )
     ).join(",");
     await monitorService.slackMessage(
-      `(TEST) Arbitrage Detected : ${cryptoList}`,
+      `Arbitrage Detected : ${cryptoList}`,
       `\n*CEX ORDER*\n${JSON.stringify(
         cexActionParams
       )}\n*AARK ORDER*\n${JSON.stringify(
