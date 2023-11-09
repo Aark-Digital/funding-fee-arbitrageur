@@ -169,14 +169,18 @@ export async function strategy() {
           orderSizeInAark,
           MAX_ORDER_USDT / cexMidUSDT,
           MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
-          IGNORE_SKEWNESS ? Infinity : Math.max(-aarkMarketStatus.skewness, 0)
+          IGNORE_SKEWNESS
+            ? Infinity
+            : Math.max(-(aarkMarketStatus.skewness + aarkPosition.size) / 2, 0)
         );
       } else {
         orderSizeInAark = Math.max(
           orderSizeInAark,
           -MAX_ORDER_USDT / cexMidUSDT,
           -MAX_POSITION_USDT / cexMidUSDT - aarkPosition.size,
-          IGNORE_SKEWNESS ? -Infinity : Math.min(-aarkMarketStatus.skewness, 0)
+          IGNORE_SKEWNESS
+            ? -Infinity
+            : Math.min(-(aarkMarketStatus.skewness + aarkPosition.size) / 2, 0)
         );
       }
       orderSizeInAark = applyQtyPrecision(orderSizeInAark, [
@@ -387,7 +391,7 @@ async function logOrderInfoToSlack(
       )
     ).join(",");
     await monitorService.slackMessage(
-      `Arbitrage Detected : ${cryptoList}`,
+      `(TEST) Arbitrage Detected : ${cryptoList}`,
       `\n*CEX ORDER*\n${JSON.stringify(
         cexActionParams
       )}\n*AARK ORDER*\n${JSON.stringify(
