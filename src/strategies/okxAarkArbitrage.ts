@@ -87,7 +87,7 @@ export async function strategy() {
     ["crypto", "pos_cex", "pos_a", "unhedged value ($)"],
   ];
   const arbSnapshot: IArbSnapshot[] = [];
-
+  const strategyStart = Date.now();
   await Promise.all([
     aarkService.fetchIndexPrices(),
     aarkService.fetchPositions(),
@@ -96,6 +96,9 @@ export async function strategy() {
     cexService.fetchPositions(),
     cexService.fetchOrderbooks(),
   ]);
+  console.log(
+    `Data fetched : ${((Date.now() - strategyStart) / 1000).toPrecision(2)}ms`
+  );
 
   const cexInfo = cexService.getMarketInfo();
   const aarkInfo = aarkService.getMarketInfo();
@@ -192,7 +195,7 @@ export async function strategy() {
       }
       if (orderSizeInAark !== 0) {
         arbSnapshot.push({
-          timestamp: new Date().getTime(),
+          timestamp: Date.now(),
           crypto,
           orderSizeInAark,
           bestAsk: cexOrderbook.asks[0],
@@ -254,6 +257,11 @@ export async function strategy() {
   ]);
 
   await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+  console.log(
+    `Strategy end. Elapsed ${((Date.now() - strategyStart) / 1000).toPrecision(
+      2
+    )}ms`
+  );
 }
 
 function getHedgeActionParam(
