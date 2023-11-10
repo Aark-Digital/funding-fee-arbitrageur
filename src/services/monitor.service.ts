@@ -71,7 +71,6 @@ export class MonitorService {
     } else if (this._isTwilioCallRecently()) {
       return;
     }
-    console.log("hi");
     this.twilioClient.calls.create({
       url: this.twilioParam.url,
       to: this.twilioParam.managerNumber,

@@ -384,7 +384,6 @@ export class OctService {
       slippageTolerance +
       price +
       qty;
-    console.log(data.length);
     return `0x${new BigNumber(data.padStart(256, "0"), 2).toString(16)}`;
   }
 }
