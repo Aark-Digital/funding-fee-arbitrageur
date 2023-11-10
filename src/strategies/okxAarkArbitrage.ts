@@ -331,8 +331,7 @@ function calcArbAmount(
       2 *
         (-100 *
           depthFactor *
-          (((p / usdcPrice) * (1 + PRICE_DIFF_THRESHOLD)) / aarkIndexPrice -
-            1) +
+          (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) +
           skewness) +
         orderSizeInAark
     );
