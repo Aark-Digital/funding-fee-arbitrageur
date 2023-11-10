@@ -16,6 +16,7 @@ import {
 import Prando from "prando";
 import axios from "axios";
 import { sleep } from "../utils/time";
+import { MonitorService } from "./monitor.service";
 
 const symbolIdMap: { [symbol: string]: string } = {
   ETH: "1",
@@ -62,7 +63,6 @@ export class AarkService {
         marketInfo: { contractSize: 1, pricePrecision: 10, qtyPrecision: 8 },
       };
     });
-
     this.octService = new OctService(signerPk);
   }
 
@@ -204,6 +204,7 @@ export class OctService {
   private readonly PRICE_DECIMALS = 8;
   private readonly QTY_DECIMALS = 10;
   private _wallet: ethers.Wallet;
+  private monitorService: MonitorService;
   private delegateePkInfo: {
     epoch: number;
     pk: string;
@@ -220,6 +221,7 @@ export class OctService {
         process.env.ALCHEMY_API_KEY!
       )
     );
+    this.monitorService = MonitorService.getInstance();
   }
 
   async init() {
@@ -232,7 +234,8 @@ export class OctService {
       OctRouterABI,
       this._wallet
     );
-    const seedInfo = this._getSeed();
+
+    const seedInfo = this._getSeed(this._getEpoch());
 
     const registeredDelegatee = await octRouter.delegatees(
       seedInfo.epoch,
@@ -243,7 +246,7 @@ export class OctService {
     const delegateeWallet = new ethers.Wallet(delegateePk, provider);
 
     if (registeredDelegatee !== delegateeWallet.address) {
-      await this.delegate();
+      await this.tryDelegate();
     } else {
       this.delegateePkInfo.epoch = seedInfo.epoch;
       this.delegateePkInfo.pk = delegateePk;
@@ -259,7 +262,8 @@ export class OctService {
     slippageTolerance: number = 0,
     isReduceOnly_: boolean = false
   ) {
-    const delegateeWallet = new ethers.Wallet(await this._getDelegateePK());
+    await this.tryDelegate();
+    const delegateeWallet = new ethers.Wallet(this.delegateePkInfo.pk);
     const nonce = Date.now();
 
     const orderObject = this._getFuturesOrderObject(
@@ -305,8 +309,17 @@ export class OctService {
     );
   }
 
-  async delegate() {
-    const delegateeWallet = new ethers.Wallet(await this._getDelegateePK());
+  async tryDelegate() {
+    const epoch = this._getEpoch();
+    if (this.delegateePkInfo.epoch === epoch) {
+      return;
+    }
+    const seedInfo = this._getSeed(epoch);
+    const signaturePK = await this._wallet.signMessage(seedInfo.seed);
+    this.delegateePkInfo.epoch = seedInfo.epoch;
+    this.delegateePkInfo.pk = `${ethers.utils.keccak256(signaturePK)}`;
+
+    const delegateeWallet = new ethers.Wallet(this.delegateePkInfo.pk);
     const nonce = Date.now();
 
     const hashMsg = ethers.utils.keccak256(
@@ -319,6 +332,12 @@ export class OctService {
 
     const signature = await this._wallet.signMessage(msgHashBinary);
     console.log(`--- Deleagation Ocurred---`);
+    await this.monitorService.slackMessage(
+      "Delegation Occurred",
+      "",
+      true,
+      true
+    );
     await axios.post(
       `${process.env.OCT_BACKEND_URL}/oct/delegate`,
       {
@@ -334,21 +353,11 @@ export class OctService {
     );
   }
 
-  private async _getDelegateePK() {
-    const seedInfo = this._getSeed();
-    if (this.delegateePkInfo.epoch != seedInfo.epoch) {
-      const signature = await this._wallet.signMessage(seedInfo.seed);
-      this.delegateePkInfo.epoch = seedInfo.epoch;
-      this.delegateePkInfo.pk = `${ethers.utils.keccak256(signature)}`;
-    }
-    const signature = await this._wallet.signMessage(seedInfo.seed);
-    return `${ethers.utils.keccak256(signature)}`;
+  private _getEpoch() {
+    return Math.floor(Number((Date.now() / 1000).toFixed()) / (3 * 24 * 3600));
   }
 
-  private _getSeed() {
-    const epoch = Math.floor(
-      Number((Date.now() / 1000).toFixed()) / (3 * 24 * 3600)
-    );
+  private _getSeed(epoch: number) {
     const random = new Prando(epoch);
     return {
       epoch: epoch,
