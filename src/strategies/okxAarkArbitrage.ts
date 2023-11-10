@@ -33,6 +33,7 @@ interface IArbSnapshot {
 
 const LOCAL_STATE: { [key: string]: any } = {
   unhedgedCnt: 0,
+  lastOrderTimestamp: {},
 };
 
 const cexService = new OkxSwapService(
@@ -51,10 +52,7 @@ const aarkService = new AarkService(
   )
 );
 
-const monitorService = new MonitorService(
-  process.env.TWILIO_PARAM ? JSON.parse(process.env.TWILIO_PARAM) : undefined,
-  process.env.SLACK_PARAM ? JSON.parse(process.env.SLACK_PARAM) : undefined
-);
+const monitorService = MonitorService.getInstance();
 
 const [
   PRICE_DIFF_THRESHOLD,
@@ -62,6 +60,7 @@ const [
   UNHEDGED_THRESHOLD,
   MAX_ORDER_USDT,
   MIN_ORDER_USDT,
+  MIN_ORDER_INTERVAL,
   IGNORE_SKEWNESS,
 ] = [
   process.env.PRICE_DIFF_THRESHOLD!,
@@ -69,6 +68,7 @@ const [
   process.env.UNHEDGED_THRESHOLD!,
   process.env.MAX_ORDER_USDT!,
   process.env.MIN_ORDER_USDT!,
+  process.env.MIN_ORDER_INTERVAL!,
   process.env.IGNORE_SKEWNESS!,
 ].map((param: string) => parseFloat(param));
 
@@ -78,6 +78,7 @@ export async function initializeStrategy() {
 }
 
 export async function strategy() {
+  const timestamp = Date.now();
   const cexActionParams: IActionParam[] = [];
   const aarkActionParams: IActionParam[] = [];
   const marketSummary: string[][] = [
@@ -96,9 +97,7 @@ export async function strategy() {
     cexService.fetchPositions(),
     cexService.fetchOrderbooks(),
   ]);
-  console.log(
-    `Data fetched : ${((Date.now() - strategyStart) / 1000).toPrecision(2)}ms`
-  );
+  console.log(`Data fetched : ${Date.now() - strategyStart}ms`);
 
   const cexInfo = cexService.getMarketInfo();
   const aarkInfo = aarkService.getMarketInfo();
@@ -193,9 +192,9 @@ export async function strategy() {
       if (Math.abs(orderSizeInAark) * cexMidUSDT < MIN_ORDER_USDT) {
         orderSizeInAark = 0;
       }
-      if (orderSizeInAark !== 0) {
+      if (orderSizeInAark !== 0 && !hadOrderRecently(crypto, timestamp)) {
         arbSnapshot.push({
-          timestamp: Date.now(),
+          timestamp,
           crypto,
           orderSizeInAark,
           bestAsk: cexOrderbook.asks[0],
@@ -216,9 +215,10 @@ export async function strategy() {
             size: orderSizeInAark,
           },
         ]);
+        updateLastOrderTimestamp(crypto, timestamp);
       }
     } catch (e) {
-      console.log(e);
+      console.log("Failed to get market action params : ", e);
       continue;
     }
   }
@@ -403,7 +403,26 @@ async function logOrderInfoToSlack(
         cexActionParams
       )}\n*AARK ORDER*\n${JSON.stringify(
         aarkActionParams
-      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`
+      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
+      false,
+      false,
+      true
     );
   }
+}
+
+function hadOrderRecently(crypto: string, timestamp: number) {
+  if (
+    LOCAL_STATE.lastOrderTimestamp[crypto] !== undefined &&
+    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - MIN_ORDER_INTERVAL
+  ) {
+    console.log(crypto, LOCAL_STATE.lastOrderTimestamp[crypto], timestamp);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+function updateLastOrderTimestamp(crypto: string, timestamp: number) {
+  LOCAL_STATE.lastOrderTimestamp[crypto] = timestamp;
 }
