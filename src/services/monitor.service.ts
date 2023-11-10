@@ -7,11 +7,22 @@ import {
 import axios from "axios";
 
 export class MonitorService {
+  private static instance: MonitorService;
   private twilioParam?: ITWilioParam;
   private twilioClient: Twilio;
   private slackParam?: ISlackParam;
-  private lastSlackMessage: ISlackMessage;
+  private slackMessageTimestamp: { [topic: string]: number } = {};
   private lastCallTimestamp: number;
+
+  static getInstance(): MonitorService {
+    if (!MonitorService.instance) {
+      MonitorService.instance = new MonitorService(
+        JSON.parse(process.env.TWILIO_PARAM!),
+        JSON.parse(process.env.SLACK_PARAM!)
+      );
+    }
+    return MonitorService.instance;
+  }
 
   constructor(twilioParam?: ITWilioParam, slackParam?: ISlackParam) {
     this.twilioParam = twilioParam;
@@ -20,10 +31,6 @@ export class MonitorService {
       twilioParam?.authToken
     );
     this.slackParam = slackParam;
-    this.lastSlackMessage = {
-      topic: "",
-      timestamp: 0,
-    };
     this.lastCallTimestamp = 0;
   }
 
@@ -31,14 +38,15 @@ export class MonitorService {
     topic: string,
     desc: string,
     tagManager: boolean = false,
-    call: boolean = false
+    call: boolean = false,
+    ignoreInterval: boolean = false
   ) {
     if (this.slackParam === undefined) {
       console.log(`UNDEINFED SLACK PARAM`);
       return;
     }
     const timestamp = new Date().getTime();
-    if (this._isSlackSentRecently(topic, timestamp)) {
+    if (!ignoreInterval && this._isSlackSentRecently(topic, timestamp)) {
       return;
     }
     const text =
@@ -53,13 +61,13 @@ export class MonitorService {
   }
 
   private _setLastSlackMessage(topic: string, timestamp: number) {
-    this.lastSlackMessage = { topic, timestamp };
+    this.slackMessageTimestamp[topic] = timestamp;
   }
 
   private _isSlackSentRecently(topic: string, timestamp: number): boolean {
     return (
-      this.lastSlackMessage.topic === topic &&
-      this.lastSlackMessage.timestamp >
+      this.slackMessageTimestamp[topic] !== undefined &&
+      this.slackMessageTimestamp[topic] >
         timestamp - this.slackParam!.messageInterval
     );
   }
