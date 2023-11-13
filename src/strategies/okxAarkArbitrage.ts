@@ -109,6 +109,7 @@ export async function strategy() {
   }
   const USDC_USDT_PRICE = (cexUSDCInfo.asks[0][0] + cexUSDCInfo.bids[0][0]) / 2;
   let hedged = true;
+  let arbitrageFound = false;
   for (const crypto of cryptoList) {
     try {
       const cexMarketInfo = cexInfo[`${crypto}_USDT`];
@@ -192,7 +193,11 @@ export async function strategy() {
       if (Math.abs(orderSizeInAark) * cexMidUSDT < MIN_ORDER_USDT) {
         orderSizeInAark = 0;
       }
-      if (orderSizeInAark !== 0 && !hadOrderRecently(crypto, timestamp)) {
+      if (
+        orderSizeInAark !== 0 &&
+        !hadOrderRecently(crypto, timestamp) &&
+        !arbitrageFound
+      ) {
         arbSnapshot.push({
           timestamp,
           crypto,
@@ -216,6 +221,7 @@ export async function strategy() {
           },
         ]);
         updateLastOrderTimestamp(crypto, timestamp);
+        arbitrageFound = true;
       }
     } catch (e) {
       console.log("Failed to get market action params : ", e);
