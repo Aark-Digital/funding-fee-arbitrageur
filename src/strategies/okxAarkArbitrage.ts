@@ -257,11 +257,7 @@ export async function strategy() {
   ]);
 
   await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
-  console.log(
-    `Strategy end. Elapsed ${((Date.now() - strategyStart) / 1000).toPrecision(
-      2
-    )}ms`
-  );
+  console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
 }
 
 function getHedgeActionParam(
