@@ -15,6 +15,10 @@ async function main() {
     console.log(`Health check app listening on port ${port}`);
   });
 
+  const strategyPeriodMs = Number(process.env.STRATEGY_PERIOD_MS);
+  if (Number.isNaN(strategyPeriodMs)) {
+    throw new Error("Undefined Strategy periods");
+  }
   const {
     strategy,
     initializeStrategy,
@@ -29,7 +33,7 @@ async function main() {
     } catch (e) {
       console.log(e);
     }
-    await sleep(5000);
+    await sleep(strategyPeriodMs);
   }
 }
 
