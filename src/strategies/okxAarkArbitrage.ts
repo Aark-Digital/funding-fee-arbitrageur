@@ -257,13 +257,12 @@ export async function strategy() {
   logActionParams(cexActionParams);
   logActionParams(aarkActionParams);
 
-  await Promise.all([
-    cexService.executeOrders(cexActionParams),
-    aarkService.executeOrders(aarkActionParams),
-  ]);
-
-  await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+  // await Promise.all([
+  //   cexService.executeOrders(cexActionParams),
+  //   aarkService.executeOrders(aarkActionParams),
+  // ]);
   console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
+  await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
 }
 
 function getHedgeActionParam(
