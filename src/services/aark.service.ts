@@ -17,18 +17,26 @@ import Prando from "prando";
 import axios from "axios";
 import { sleep } from "../utils/time";
 import { MonitorService } from "./monitor.service";
+import { Balance } from "../interfaces/basic-interface";
+import { parseEthersBignumber } from "../utils/number";
 
-const symbolIdMap: { [symbol: string]: string } = {
-  ETH: "1",
-  BTC: "2",
-  BNB: "3",
-  XRP: "4",
-  MATIC: "5",
-  ARB: "6",
-  SOL: "7",
-  USDT: "8",
-  DOGE: "9",
-  LINK: "10",
+const symbolIdMap: { [symbol: string]: number } = {
+  ETH: 1,
+  BTC: 2,
+  BNB: 3,
+  XRP: 4,
+  MATIC: 5,
+  ARB: 6,
+  SOL: 7,
+  USDT: 8,
+  DOGE: 9,
+  LINK: 10,
+};
+
+const collateralAddressMap: { [symbol: string]: string } = {
+  "0x17FC002b466eEc40DaE837Fc4bE5c67993ddBd6F": "FRAX",
+  "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f": "BTC",
+  "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1": "ETH",
 };
 
 export class AarkService {
@@ -36,6 +44,7 @@ export class AarkService {
   private contractReader: ethers.Contract;
   private symbolList: string[];
   private markets: { [symbol: string]: IAarkMarket } = {};
+  private balances: undefined | Balance[];
   private signer: ethers.Wallet;
   private provider: ethers.providers.AlchemyProvider =
     new ethers.providers.AlchemyProvider(
@@ -57,12 +66,13 @@ export class AarkService {
         orderbook: undefined,
         position: undefined,
         openOrders: undefined,
-        balance: undefined,
         indexPrice: undefined,
         marketStatus: undefined,
-        marketInfo: { contractSize: 1, pricePrecision: 10, qtyPrecision: 8 },
+        fundingRate: undefined,
+        marketInfo: { contractSize: 1, pricePrecision: 8, qtyPrecision: 10 },
       };
     });
+    this.balances = undefined;
     this.octService = new OctService(signerPk);
   }
 
@@ -85,35 +95,6 @@ export class AarkService {
 
   async fetchOpenOrders() {
     throw new Error("Not Implemented");
-  }
-
-  async fetchPositions() {
-    try {
-      const timestamp = new Date().getTime();
-      const response = await this.contractReader.getUserFuturesStatus(
-        this.signer.address
-      );
-
-      const positions = response[0].map((position: any) =>
-        new BigNumber(position[0].toString()).dividedBy(1e10).toFixed()
-      );
-
-      this.symbolList.forEach((symbol: string) => {
-        const size = Number(
-          positions[symbolIdMap[this.getFormattedSymbol(symbol)]]
-        );
-        this.markets[symbol].position = {
-          symbol,
-          timestamp,
-          size,
-        };
-      });
-    } catch {
-      console.log(`[Aark Service] Failed to fetch Positions`);
-      this.symbolList.forEach((symbol: string) => {
-        this.markets[symbol].position = undefined;
-      });
-    }
   }
 
   async fetchIndexPrices() {
@@ -142,24 +123,12 @@ export class AarkService {
       this.symbolList.forEach((symbol: string) => {
         const rawData = response[symbolIdMap[this.getFormattedSymbol(symbol)]];
         this.markets[symbol].marketStatus = {
-          fundingRatePrice24h: Number(
-            new BigNumber(rawData[1].toString())
-              .dividedBy(1e18)
-              .multipliedBy(86400)
-              .toFixed()
-          ),
-          skewness: Number(
-            new BigNumber(rawData[2].toString()).dividedBy(1e10).toFixed()
-          ),
-          depthFactor: Number(
-            new BigNumber(rawData[4].toString()).dividedBy(1e10).toFixed()
-          ),
-          oiHardCap: Number(
-            new BigNumber(rawData[5].toString()).dividedBy(1e10).toFixed()
-          ),
-          oiSoftCap: Number(
-            new BigNumber(rawData[6].toString()).dividedBy(1e10).toFixed()
-          ),
+          fundingRatePrice24h:
+            parseEthersBignumber(rawData.fundingRate, 18) * 86400,
+          skewness: parseEthersBignumber(rawData.skewness, 10),
+          depthFactor: parseEthersBignumber(rawData.depthFactor, 10),
+          oiHardCap: parseEthersBignumber(rawData.skewnessHardCap, 10),
+          oiSoftCap: parseEthersBignumber(rawData.skewnessSoftCap, 10),
         };
       });
     } catch (e) {
@@ -167,6 +136,52 @@ export class AarkService {
       this.symbolList.forEach((symbol: string) => {
         this.markets[symbol].marketStatus = undefined;
       });
+    }
+  }
+
+  async fetchUserStatus() {
+    const timestamp = Date.now();
+    try {
+      const response = await this.contractReader.getUserFuturesStatus(
+        this.signer.address
+      );
+
+      this.balances = response.collaterals
+        .filter(
+          (col: any) =>
+            col.tokenAddress != "0x0000000000000000000000000000000000000000"
+        )
+        .map((col: any) => ({
+          currency: collateralAddressMap[col.tokenAddress],
+          total: parseEthersBignumber(col.qty, 18),
+          available: parseEthersBignumber(col.withdrawable, 18),
+          weight: parseEthersBignumber(col.totalWeight, 4),
+        }))
+        .concat([
+          {
+            currency: "USDC",
+            total: parseEthersBignumber(response.usdBalance, 18),
+            available: parseEthersBignumber(response.withdrawableUsd, 18),
+            weight: 1,
+          },
+        ]);
+
+      this.symbolList.forEach((symbol, idx) => {
+        const position =
+          response.positions[symbolIdMap[this.getFormattedSymbol(symbol)]];
+        this.markets[symbol].position = {
+          timestamp,
+          symbol,
+          price: parseEthersBignumber(position.entryPrice, 8),
+          size: parseEthersBignumber(position.qty, 10),
+        };
+      });
+    } catch (e) {
+      console.log(`[Aark Service] Failed to fetch user status: ${e}`);
+      this.symbolList.forEach((symbol: string) => {
+        this.markets[symbol].position = undefined;
+      });
+      this.balances = undefined;
     }
   }
 
@@ -191,7 +206,7 @@ export class AarkService {
     for (const param of marketOrderParams) {
       await this.octService.octOrder(
         Math.abs(param.size),
-        Number(symbolIdMap[this.getFormattedSymbol(param.symbol)]),
+        symbolIdMap[this.getFormattedSymbol(param.symbol)],
         param.size > 0 ? true : false,
         false
       );
