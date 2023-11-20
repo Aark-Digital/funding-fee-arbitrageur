@@ -332,11 +332,11 @@ function getArbAmountInAark(
   );
 
   console.log(`
-ENTER LONG  : ${formatNumber(enterLongTreshold, 8)}
-ENTER SHORT : ${formatNumber(enterShortTreshold, 8)}
-EXIT LONG   : ${formatNumber(exitLongTreshold, 8)}
-EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
-`);
+  ENTER LONG  : ${formatNumber(enterLongTreshold, 8)}
+  ENTER SHORT : ${formatNumber(enterShortTreshold, 8)}
+  EXIT LONG   : ${formatNumber(exitLongTreshold, 8)}
+  EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
+  `);
   let orderSizeInAark;
   // ENTER AARK LONG
   orderSizeInAark = _getArbBuyAmountInAark(
@@ -464,7 +464,10 @@ function calcExitThreshold(
     ((sign * EXPECTED_POSITION_INTERVAL) / ONE_DAY_IN_MS) * aarkFundingRate24h,
     0
   );
-  const positionPremiumAdjTerm = -Math.max(enterPricePremium, 0);
+  const positionPremiumAdjTerm = -Math.max(
+    enterPricePremium - PRICE_DIFF_THRESHOLD,
+    0
+  );
   return (
     PRICE_DIFF_THRESHOLD +
     cexFundingAdjTerm +
