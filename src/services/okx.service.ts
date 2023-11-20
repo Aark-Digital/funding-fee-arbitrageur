@@ -14,11 +14,13 @@ import {
   floor_dp,
   numberToPrecision,
 } from "../utils/number";
+import { Balance } from "src/interfaces/basic-interface";
 
 export class OkxSwapService {
   private baseUrl: string = "https://www.okx.com";
   private symbolList: string[];
   private markets: { [symbol: string]: IMarket } = {};
+  private balances: undefined | Balance[];
   private apiInfo: {
     apiKey: string;
     secret: string;
@@ -42,10 +44,11 @@ export class OkxSwapService {
         orderbook: undefined,
         position: undefined,
         openOrders: undefined,
-        balance: undefined,
+        fundingRate: undefined,
         marketInfo: { contractSize: 0, pricePrecision: 0, qtyPrecision: 0 },
       };
     });
+    this.balances = undefined;
   }
 
   async init() {
@@ -148,11 +151,13 @@ export class OkxSwapService {
             symbol,
             timestamp,
             size: 0,
+            price: 0,
           };
         } else {
           this.markets[symbol].position = {
             symbol,
             size: Number(position.pos) * contractSize,
+            price: Number(position.avgPx),
             timestamp,
           };
         }
@@ -194,6 +199,51 @@ export class OkxSwapService {
       console.log(`[ERROR] Failed to fetch open orders : ${e}`);
       for (const symbol of this.symbolList) {
         this.markets[symbol].openOrders = undefined;
+      }
+    }
+  }
+
+  async fetchBalances(): Promise<void> {
+    const timestamp = new Date().getTime();
+    try {
+      const balances = await this._privateGet("/api/v5/account/balance", {});
+      this.balances = balances.data.details.map((balance: any) => ({
+        timestamp,
+        currency: balance.ccy,
+        total: balance.eq,
+        available: balance.availEq,
+      }));
+    } catch (e) {
+      console.log(`[ERROR] Failed to fetch open orders : ${e}`);
+      for (const symbol of this.symbolList) {
+        this.balances = undefined;
+      }
+    }
+  }
+
+  async fetchFundingRate(): Promise<void> {
+    const timestamp = new Date().getTime();
+    try {
+      const fundingRates: any[] = await Promise.all(
+        this.symbolList.map((symbol: string) =>
+          this._publicGet("/api/v5/public/funding-rate", {
+            instId: this.getFormattedSymbol(symbol),
+          })
+        )
+      );
+      this.symbolList.forEach((symbol: string, idx: number) => {
+        const fr = fundingRates[idx].data[0];
+        this.markets[symbol].fundingRate = {
+          timestamp,
+          symbol,
+          fundingRate: Number(fr.fundingRate),
+          fundingTime: Number(fr.fundingTime),
+        };
+      });
+    } catch (e) {
+      console.log(`[ERROR] Failed to fetch funding rates : ${e}`);
+      for (const symbol of this.symbolList) {
+        this.markets[symbol].fundingRate = undefined;
       }
     }
   }

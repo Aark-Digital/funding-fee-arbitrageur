@@ -29,3 +29,9 @@ export function convertSizeToContractAmount(
     round_dp(size / marketInfo.contractSize, marketInfo.qtyPrecision)
   );
 }
+
+export function parseEthersBignumber(bn: any, decimal: number) {
+  return Number(
+    new BigNumber(bn.toString()).dividedBy(10 ** decimal).toFixed()
+  );
+}
