@@ -375,9 +375,9 @@ function getArbAmountInAark(
     aarkPosition.size === 0
       ? 0
       : aarkPosition.size > 0
-      ? cexPosition.price / aarkPosition.price - 1
-      : aarkPosition.price / cexPosition.price - 1;
-  const enterLongTreshold = calcEnterThreshold(
+      ? cexPosition.price / aarkPosition.price / usdcPrice - 1
+      : (aarkPosition.price * usdcPrice) / cexPosition.price - 1;
+  const enterLongThreshold = calcEnterThreshold(
     cexFundingRate,
     aarkFundingRate,
     true
