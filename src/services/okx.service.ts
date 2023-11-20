@@ -96,6 +96,10 @@ export class OkxSwapService {
     return this.markets;
   }
 
+  getBalance() {
+    return this.balances;
+  }
+
   async fetchOrderbooks() {
     try {
       const orderbooks: any[] = await Promise.all(
@@ -207,17 +211,15 @@ export class OkxSwapService {
     const timestamp = new Date().getTime();
     try {
       const balances = await this._privateGet("/api/v5/account/balance", {});
-      this.balances = balances.data.details.map((balance: any) => ({
+      this.balances = balances.data[0].details.map((balance: any) => ({
         timestamp,
         currency: balance.ccy,
-        total: balance.eq,
-        available: balance.availEq,
+        total: Number(balance.eq),
+        available: Number(balance.availEq),
       }));
     } catch (e) {
-      console.log(`[ERROR] Failed to fetch open orders : ${e}`);
-      for (const symbol of this.symbolList) {
-        this.balances = undefined;
-      }
+      console.log(`[ERROR] Failed to fetch balances : ${e}`);
+      this.balances = undefined;
     }
   }
 
@@ -327,11 +329,16 @@ export class OkxSwapService {
   ): Promise<any> {
     const timestamp = new Date();
 
+    const url =
+      Object.keys(params).length === 0
+        ? endPoint
+        : endPoint + "?" + new URLSearchParams(params).toString();
+
     const headers = {
       "OK-ACCESS-KEY": this.apiInfo.apiKey,
       "OK-ACCESS-SIGN": this._getSignature(
         timestamp,
-        endPoint + "?" + new URLSearchParams(params).toString(),
+        url,
         "",
         this.apiInfo.secret,
         "GET"

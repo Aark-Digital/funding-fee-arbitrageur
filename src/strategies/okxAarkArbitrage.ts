@@ -1,4 +1,5 @@
 import {
+  Balance,
   FundingRate,
   Orderbook,
   Position,
@@ -63,6 +64,10 @@ const [
   MIN_ORDER_INTERVAL,
   EXPECTED_POSITION_INTERVAL,
   MAX_MARKET_SKEWNESS_USDT,
+  INITIAL_BALANCE_USDT,
+  BALANCE_RATIO_IN_OKX,
+  BALANCE_RATIO_IN_AARK,
+  BALANCE_RATIO_DIFF_THRESHOLD,
 ] = [
   process.env.PRICE_DIFF_THRESHOLD!,
   process.env.MAX_POSITION_USDT!,
@@ -72,6 +77,10 @@ const [
   process.env.MIN_ORDER_INTERVAL!,
   process.env.EXPECTED_POSITION_INTERVAL!,
   process.env.MAX_MARKET_SKEWNESS_USDT!,
+  process.env.INITIAL_BALANCE_USDT!,
+  process.env.BALANCE_RATIO_IN_OKX!,
+  process.env.BALANCE_RATIO_IN_AARK!,
+  process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
 ].map((param: string) => parseFloat(param));
 
 export async function initializeStrategy() {
@@ -97,6 +106,7 @@ export async function strategy() {
     aarkService.fetchMarketStatuses(),
     cexService.fetchOpenOrders(),
     cexService.fetchPositions(),
+    cexService.fetchBalances(),
     cexService.fetchOrderbooks(),
     cexService.fetchFundingRate(),
   ]);
@@ -110,7 +120,19 @@ export async function strategy() {
   if (cexUSDCInfo === undefined) {
     throw new Error(`[Data Fetch Fail] Failed to fetch USDC market Info`);
   }
+
+  const cexBalance = cexService.getBalance();
+  if (cexBalance === undefined) {
+    throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
+  }
+
+  const aarkBalance = aarkService.getBalance();
+  if (aarkBalance === undefined) {
+    throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
+  }
+
   const USDC_USDT_PRICE = (cexUSDCInfo.asks[0][0] + cexUSDCInfo.bids[0][0]) / 2;
+  await checkBalance(cexBalance, aarkBalance, USDC_USDT_PRICE);
   let hedged = true;
   let arbitrageFound = false;
   for (const crypto of cryptoList) {
@@ -253,6 +275,53 @@ export async function strategy() {
   ]);
   console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
   await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+}
+
+async function checkBalance(
+  cexBalance: Balance[],
+  aarkBalance: Balance[],
+  usdcPrice: number
+) {
+  const cexBalanceUSDT = cexBalance
+    .filter((balance) => balance.currency === "USDT")
+    .reduce((acc, balance) => acc + balance.total, 0);
+  const aarkBalanceUSDC = aarkBalance
+    .filter((balance) => balance.currency === "USDC")
+    .reduce((acc, balance) => acc + balance.total, 0);
+  console.log(cexBalanceUSDT, aarkBalanceUSDC);
+  if (
+    Math.abs(cexBalanceUSDT - INITIAL_BALANCE_USDT * BALANCE_RATIO_IN_OKX) >
+    INITIAL_BALANCE_USDT * BALANCE_RATIO_DIFF_THRESHOLD
+  ) {
+    await monitorService.slackMessage(
+      "OKX BALANCE OUT OF RANGE",
+      `okx balance USDT : ${formatNumber(
+        cexBalanceUSDT,
+        2
+      )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
+      true,
+      true,
+      false
+    );
+  }
+
+  if (
+    Math.abs(
+      aarkBalanceUSDC - INITIAL_BALANCE_USDT * BALANCE_RATIO_IN_AARK * usdcPrice
+    ) >
+    INITIAL_BALANCE_USDT * BALANCE_RATIO_DIFF_THRESHOLD * usdcPrice
+  ) {
+    await monitorService.slackMessage(
+      "AARK BALANCE OUT OF RANGE",
+      `okx balance USDT : ${formatNumber(
+        cexBalanceUSDT,
+        2
+      )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
+      true,
+      true,
+      false
+    );
+  }
 }
 
 function getHedgeActionParam(
