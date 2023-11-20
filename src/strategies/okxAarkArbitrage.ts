@@ -247,12 +247,12 @@ export async function strategy() {
   logActionParams(cexActionParams);
   logActionParams(aarkActionParams);
 
-  // await Promise.all([
-  //   cexService.executeOrders(cexActionParams),
-  //   aarkService.executeOrders(aarkActionParams),
-  // ]);
+  await Promise.all([
+    cexService.executeOrders(cexActionParams),
+    aarkService.executeOrders(aarkActionParams),
+  ]);
   console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
-  // await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+  await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
 }
 
 function getHedgeActionParam(
@@ -348,7 +348,7 @@ EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
     usdcPrice
   );
   if (aarkStatus.skewness < 0 && orderSizeInAark > 0) {
-    console.log(`ENTER LONG, ${formatNumber(orderSizeInAark, 8)}`);
+    // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
     return _limitBuyOrderSize(
       orderSizeInAark,
       cexMidUSDT,
@@ -368,7 +368,7 @@ EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
     usdcPrice
   );
   if (aarkStatus.skewness > 0 && orderSizeInAark < 0) {
-    console.log(`ENTER SHORT, ${formatNumber(orderSizeInAark, 8)}`);
+    // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
     return _limitSellOrderSize(
       orderSizeInAark,
       cexMidUSDT,
@@ -389,7 +389,7 @@ EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
       usdcPrice
     );
     if (aarkPosition.size > 0 && orderSizeInAark < 0) {
-      console.log(`EXIT LONG, ${formatNumber(orderSizeInAark, 8)}`);
+      // console.log(`EXIT LONG ${formatNumber(orderSizeInAark, 8)}`);
       return _limitSellOrderSize(
         orderSizeInAark,
         cexMidUSDT,
@@ -414,7 +414,7 @@ EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
       usdcPrice
     );
     if (aarkPosition.size < 0 && orderSizeInAark > 0) {
-      console.log(`EXIT SHORT, ${formatNumber(orderSizeInAark, 8)}`);
+      // console.log(`EXIT SHORT ${formatNumber(orderSizeInAark, 8)}`);
       return _limitBuyOrderSize(
         orderSizeInAark,
         cexMidUSDT,
