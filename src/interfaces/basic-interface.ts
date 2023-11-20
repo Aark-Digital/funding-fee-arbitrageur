@@ -3,7 +3,7 @@ import { Side } from "./order-interface";
 export interface Position {
   timestamp: number;
   symbol: string;
-  price?: number;
+  price: number;
   size: number;
 }
 
@@ -19,6 +19,12 @@ export interface Balance {
   currency: string;
   total: number;
   available: number;
+  weight?: number;
+}
+
+export interface Balances {
+  balances: Balance[];
+  timestamp: number;
 }
 
 export interface OpenOrder {
@@ -33,4 +39,11 @@ export interface OpenOrder {
 export interface OpenOrders {
   openOrders: OpenOrder[];
   timestamp: number;
+}
+
+export interface FundingRate {
+  timestamp: number;
+  symbol: string;
+  fundingRate: number;
+  fundingTime: number;
 }

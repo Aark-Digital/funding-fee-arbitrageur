@@ -1,4 +1,10 @@
-import { Balance, OpenOrders, Orderbook, Position } from "./basic-interface";
+import {
+  Balances,
+  FundingRate,
+  OpenOrders,
+  Orderbook,
+  Position,
+} from "./basic-interface";
 
 export interface IMarketInfo {
   contractSize: number;
@@ -8,8 +14,8 @@ export interface IMarketInfo {
 export interface IMarket {
   position: Position | undefined;
   orderbook: Orderbook | undefined;
-  balance: Balance | undefined;
   openOrders: OpenOrders | undefined;
+  fundingRate: FundingRate | undefined;
   marketInfo: IMarketInfo;
 }
 
