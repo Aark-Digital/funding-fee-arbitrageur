@@ -14,7 +14,7 @@ import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
 import { OkxSwapService } from "../services/okx.service";
 import { logActionParams } from "../utils/logger";
-import { formatNumber } from "../utils/number";
+import { formatNumber, round_dp } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
 import { validateAndReturnData } from "../utils/validation";
 import { table } from "table";
@@ -136,7 +136,6 @@ export async function strategy() {
   let hedged = true;
   let arbitrageFound = false;
   for (const crypto of cryptoList) {
-    console.log(`~~~~~~~ ${crypto} ~~~~~~~`);
     try {
       const cexMarket = cexInfo[`${crypto}_USDT`];
       const aarkMarket = aarkInfo[`${crypto}_USDC`];
@@ -183,6 +182,7 @@ export async function strategy() {
       }
 
       let orderSizeInAark = getArbAmountInAark(
+        crypto,
         cexMarket,
         aarkMarket,
         USDC_USDT_PRICE
@@ -288,7 +288,12 @@ async function checkBalance(
   const aarkBalanceUSDC = aarkBalance
     .filter((balance) => balance.currency === "USDC")
     .reduce((acc, balance) => acc + balance.total, 0);
-  console.log(cexBalanceUSDT, aarkBalanceUSDC);
+  console.log(
+    JSON.stringify({
+      okxUSDT: round_dp(cexBalanceUSDT, 2),
+      aarkUSDC: round_dp(aarkBalanceUSDC, 2),
+    })
+  );
   if (
     Math.abs(cexBalanceUSDT - INITIAL_BALANCE_USDT * BALANCE_RATIO_IN_OKX) >
     INITIAL_BALANCE_USDT * BALANCE_RATIO_DIFF_THRESHOLD
@@ -358,6 +363,7 @@ function getHedgeActionParam(
 }
 
 function getArbAmountInAark(
+  crypto: string,
   cexMarket: IMarket,
   aarkMarket: IAarkMarket,
   usdcPrice: number
@@ -382,30 +388,33 @@ function getArbAmountInAark(
     aarkFundingRate,
     true
   );
-  const enterShortTreshold = calcEnterThreshold(
+  const enterShortThreshold = calcEnterThreshold(
     cexFundingRate,
     aarkFundingRate,
     false
   );
-  const exitLongTreshold = calcExitThreshold(
+  const exitLongThreshold = calcExitThreshold(
     cexFundingRate,
     aarkFundingRate,
     positionPremium,
     true
   );
-  const exitShortTreshold = calcExitThreshold(
+  const exitShortThreshold = calcExitThreshold(
     cexFundingRate,
     aarkFundingRate,
     positionPremium,
     false
   );
 
-  console.log(`
-  ENTER LONG  : ${formatNumber(enterLongTreshold, 8)}
-  ENTER SHORT : ${formatNumber(enterShortTreshold, 8)}
-  EXIT LONG   : ${formatNumber(exitLongTreshold, 8)}
-  EXIT SHORT  : ${formatNumber(exitShortTreshold, 8)}
-  `);
+  console.log(
+    JSON.stringify({
+      crypto,
+      enterLong: round_dp(enterLongThreshold, 8),
+      enterShort: round_dp(enterShortThreshold, 8),
+      exitLong: round_dp(exitLongThreshold, 8),
+      exitShort: round_dp(exitShortThreshold, 8),
+    })
+  );
   let orderSizeInAark;
   // ENTER AARK LONG
   orderSizeInAark = _getArbBuyAmountInAark(
@@ -413,7 +422,7 @@ function getArbAmountInAark(
     cexMarketInfo,
     aarkStatus,
     aarkIndexPrice,
-    calcEnterThreshold(cexFundingRate, aarkFundingRate, true),
+    enterLongThreshold,
     usdcPrice
   );
   if (aarkStatus.skewness < 0 && orderSizeInAark > 0) {
@@ -433,7 +442,7 @@ function getArbAmountInAark(
     cexMarketInfo,
     aarkStatus,
     aarkIndexPrice,
-    calcEnterThreshold(cexFundingRate, aarkFundingRate, false),
+    enterShortThreshold,
     usdcPrice
   );
   if (aarkStatus.skewness > 0 && orderSizeInAark < 0) {
@@ -454,7 +463,7 @@ function getArbAmountInAark(
       cexMarketInfo,
       aarkStatus,
       aarkIndexPrice,
-      calcExitThreshold(cexFundingRate, aarkFundingRate, positionPremium, true),
+      exitLongThreshold,
       usdcPrice
     );
     if (aarkPosition.size > 0 && orderSizeInAark < 0) {
@@ -474,12 +483,7 @@ function getArbAmountInAark(
       cexMarketInfo,
       aarkStatus,
       aarkIndexPrice,
-      calcExitThreshold(
-        cexFundingRate,
-        aarkFundingRate,
-        positionPremium,
-        false
-      ),
+      exitShortThreshold,
       usdcPrice
     );
     if (aarkPosition.size < 0 && orderSizeInAark > 0) {
@@ -502,10 +506,10 @@ function getArbAmountInAark(
 function calcEnterThreshold(
   cexFundingRate: FundingRate,
   aarkFundingRate24h: number,
-  isBuy: boolean // true = ENTER AARK LONG, false = ENTER AARK SHORT
+  isLong: boolean // true = ENTER AARK LONG, false = ENTER AARK SHORT
 ): number {
   const ts = Date.now();
-  const sign = isBuy ? 1 : -1;
+  const sign = isLong ? 1 : -1;
   const cexFundingAdjTerm =
     -sign *
     cexFundingRate.fundingRate *
@@ -519,10 +523,10 @@ function calcExitThreshold(
   cexFundingRate: FundingRate,
   aarkFundingRate24h: number,
   enterPricePremium: number,
-  isBuy: boolean // true = EXIT AARK LONG = AARK SHORT, false = EXIT AARK SHORT = AARK LONG
+  isLong: boolean // true = EXIT AARK LONG = AARK SHORT, false = EXIT AARK SHORT = AARK LONG
 ): number {
   const ts = Date.now();
-  const sign = isBuy ? 1 : -1;
+  const sign = isLong ? 1 : -1;
   const cexFundingAdjTerm = -Math.max(
     -sign *
       cexFundingRate.fundingRate *
