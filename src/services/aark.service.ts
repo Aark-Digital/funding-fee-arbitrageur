@@ -89,6 +89,10 @@ export class AarkService {
     return this.markets;
   }
 
+  getBalance() {
+    return this.balances;
+  }
+
   async fetchOrderbooks() {
     throw new Error("Not Implemented");
   }
