@@ -68,6 +68,8 @@ const [
   BALANCE_RATIO_IN_OKX,
   BALANCE_RATIO_IN_AARK,
   BALANCE_RATIO_DIFF_THRESHOLD,
+
+  DATA_FETCH_TIME_THRESHOLD,
 ] = [
   process.env.PRICE_DIFF_THRESHOLD!,
   process.env.MAX_POSITION_USDT!,
@@ -81,6 +83,7 @@ const [
   process.env.BALANCE_RATIO_IN_OKX!,
   process.env.BALANCE_RATIO_IN_AARK!,
   process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
+  process.env.DATA_FETCH_TIME_THRESHOLD!,
 ].map((param: string) => parseFloat(param));
 
 export async function initializeStrategy() {
@@ -110,7 +113,18 @@ export async function strategy() {
     cexService.fetchOrderbooks(),
     cexService.fetchFundingRate(),
   ]);
-  console.log(`Data fetched : ${Date.now() - strategyStart}ms`);
+  const dataFetchingTime = Date.now() - strategyStart;
+  console.log(`Data fetched : ${dataFetchingTime}ms`);
+  if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD) {
+    await monitorService.slackMessage(
+      `Arbitrage : Data Error`,
+      `Took too much time to fetch data : ${dataFetchingTime}ms.`,
+      true,
+      false,
+      true
+    );
+    return;
+  }
 
   const cexInfo = cexService.getMarketInfo();
   const aarkInfo = aarkService.getMarketInfo();
