@@ -151,6 +151,9 @@ export async function strategy() {
   let arbitrageFound = false;
   for (const crypto of cryptoList) {
     try {
+      const arbitrageInfo: any = {
+        crypto,
+      };
       const cexMarket = cexInfo[`${crypto}_USDT`];
       const aarkMarket = aarkInfo[`${crypto}_USDC`];
 
@@ -195,12 +198,13 @@ export async function strategy() {
         continue;
       }
 
-      let orderSizeInAark = getArbAmountInAark(
+      let [orderSizeInAark, thresholdInfo] = getArbAmountInAark(
         crypto,
         cexMarket,
         aarkMarket,
         USDC_USDT_PRICE
       );
+      Object.assign(arbitrageInfo, thresholdInfo);
 
       marketSummary.push(
         getMarketSummary(
@@ -248,6 +252,17 @@ export async function strategy() {
         updateLastOrderTimestamp(crypto, timestamp);
         arbitrageFound = true;
       }
+
+      Object.assign(arbitrageInfo, {
+        cexAsk: cexOrderbook.asks[0][0],
+        cexBid: cexOrderbook.bids[0][0],
+        cexFundingRate: cexFundingRate.fundingRate,
+        cexPosition,
+        aarkPosition,
+        aarkMarketStatus,
+        aarkIndexPrice,
+      });
+      console.log(arbitrageInfo);
     } catch (e) {
       console.log("Failed to get market action params : ", e);
       continue;
@@ -381,7 +396,7 @@ function getArbAmountInAark(
   cexMarket: IMarket,
   aarkMarket: IAarkMarket,
   usdcPrice: number
-): number {
+): [number, any] {
   const cexOrderbook = cexMarket.orderbook!;
   const cexMidUSDT = (cexOrderbook.bids[0][0] + cexOrderbook.asks[0][0]) / 2;
   const cexMarketInfo = cexMarket.marketInfo!;
@@ -419,16 +434,13 @@ function getArbAmountInAark(
     positionPremium,
     false
   );
+  const thresholdInfo = {
+    enterLong: round_dp(enterLongThreshold, 8),
+    enterShort: round_dp(enterShortThreshold, 8),
+    exitLong: round_dp(exitLongThreshold, 8),
+    exitShort: round_dp(exitShortThreshold, 8),
+  };
 
-  console.log(
-    JSON.stringify({
-      crypto,
-      enterLong: round_dp(enterLongThreshold, 8),
-      enterShort: round_dp(enterShortThreshold, 8),
-      exitLong: round_dp(exitLongThreshold, 8),
-      exitShort: round_dp(exitShortThreshold, 8),
-    })
-  );
   let orderSizeInAark;
   // ENTER AARK LONG
   orderSizeInAark = _getArbBuyAmountInAark(
@@ -441,13 +453,16 @@ function getArbAmountInAark(
   );
   if (aarkStatus.skewness < 0 && orderSizeInAark > 0) {
     // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
-    return _limitBuyOrderSize(
-      orderSizeInAark,
-      cexMidUSDT,
-      aarkPosition.size,
-      aarkStatus.skewness,
-      false
-    );
+    return [
+      _limitBuyOrderSize(
+        orderSizeInAark,
+        cexMidUSDT,
+        aarkPosition.size,
+        aarkStatus.skewness,
+        false
+      ),
+      thresholdInfo,
+    ];
   }
 
   // ENTER AARK SHORT
@@ -461,13 +476,16 @@ function getArbAmountInAark(
   );
   if (aarkStatus.skewness > 0 && orderSizeInAark < 0) {
     // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
-    return _limitSellOrderSize(
-      orderSizeInAark,
-      cexMidUSDT,
-      aarkPosition.size,
-      aarkStatus.skewness,
-      false
-    );
+    return [
+      _limitSellOrderSize(
+        orderSizeInAark,
+        cexMidUSDT,
+        aarkPosition.size,
+        aarkStatus.skewness,
+        false
+      ),
+      thresholdInfo,
+    ];
   }
 
   if (aarkPosition.size !== 0) {
@@ -482,13 +500,16 @@ function getArbAmountInAark(
     );
     if (aarkPosition.size > 0 && orderSizeInAark < 0) {
       // console.log(`EXIT LONG ${formatNumber(orderSizeInAark, 8)}`);
-      return _limitSellOrderSize(
-        orderSizeInAark,
-        cexMidUSDT,
-        aarkPosition.size,
-        aarkStatus.skewness,
-        true
-      );
+      return [
+        _limitSellOrderSize(
+          orderSizeInAark,
+          cexMidUSDT,
+          aarkPosition.size,
+          aarkStatus.skewness,
+          true
+        ),
+        thresholdInfo,
+      ];
     }
 
     // EXIT AARK SHORT (= AARK LONG)
@@ -502,19 +523,22 @@ function getArbAmountInAark(
     );
     if (aarkPosition.size < 0 && orderSizeInAark > 0) {
       // console.log(`EXIT SHORT ${formatNumber(orderSizeInAark, 8)}`);
-      return _limitBuyOrderSize(
-        orderSizeInAark,
-        cexMidUSDT,
-        aarkPosition.size,
-        aarkStatus.skewness,
-        true
-      );
+      return [
+        _limitBuyOrderSize(
+          orderSizeInAark,
+          cexMidUSDT,
+          aarkPosition.size,
+          aarkStatus.skewness,
+          true
+        ),
+        thresholdInfo,
+      ];
     }
   } else {
-    return 0;
+    return [0, thresholdInfo];
   }
 
-  return 0;
+  return [0, thresholdInfo];
 }
 
 function calcEnterThreshold(
