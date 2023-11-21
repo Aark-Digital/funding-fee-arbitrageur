@@ -119,7 +119,7 @@ export async function strategy() {
     await monitorService.slackMessage(
       `Arbitrage : Data Error`,
       `Took too much time to fetch data : ${dataFetchingTime}ms.`,
-      true,
+      false,
       false,
       true
     );
