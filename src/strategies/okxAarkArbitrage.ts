@@ -262,7 +262,7 @@ export async function strategy() {
         aarkMarketStatus,
         aarkIndexPrice,
       });
-      console.log(arbitrageInfo);
+      console.log(JSON.stringify(arbitrageInfo));
     } catch (e) {
       console.log("Failed to get market action params : ", e);
       continue;
