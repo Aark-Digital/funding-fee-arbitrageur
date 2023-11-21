@@ -29,7 +29,7 @@ async function main() {
   while (true) {
     try {
       console.log(`~~~~~~~ ${new Date().toISOString()} ~~~~~~~`);
-      strategy();
+      await strategy();
     } catch (e) {
       console.log(e);
     }
