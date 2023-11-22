@@ -288,11 +288,12 @@ export async function strategy() {
       Object.assign(arbitrageInfo, {
         cexAsk: cexOrderbook.asks[0][0],
         cexBid: cexOrderbook.bids[0][0],
-        cexFundingRate: cexFundingRate.fundingRate,
+        cexFundingRate: cexFundingRate,
         cexPosition,
         aarkPosition,
         aarkMarketStatus,
         aarkIndexPrice,
+        timestamp: Date.now(),
       });
       console.log(JSON.stringify(arbitrageInfo));
     } catch (e) {
@@ -471,6 +472,7 @@ function getArbAmountInAark(
     enterShort: round_dp(enterShortThreshold, 8),
     exitLong: round_dp(exitLongThreshold, 8),
     exitShort: round_dp(exitShortThreshold, 8),
+    usdcPrice,
   };
 
   let orderSizeInAark;
