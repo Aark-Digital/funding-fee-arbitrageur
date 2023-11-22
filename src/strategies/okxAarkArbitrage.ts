@@ -102,18 +102,50 @@ export async function strategy() {
     ["crypto", "pos_cex", "pos_a", "unhedged value ($)"],
   ];
   const arbSnapshot: IArbSnapshot[] = [];
+  const dataFetchLatencyInfo: { [key: string]: number } = {};
   const strategyStart = Date.now();
   await Promise.all([
-    aarkService.fetchIndexPrices(),
-    aarkService.fetchUserStatus(),
-    aarkService.fetchMarketStatuses(),
-    cexService.fetchOpenOrders(),
-    cexService.fetchPositions(),
-    cexService.fetchBalances(),
-    cexService.fetchOrderbooks(),
-    cexService.fetchFundingRate(),
+    aarkService.fetchIndexPrices().then(() => {
+      dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
+        Date.now() - strategyStart;
+    }),
+    aarkService.fetchUserStatus().then(() => {
+      dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+        Date.now() - strategyStart;
+    }),
+    ,
+    aarkService.fetchMarketStatuses().then(() => {
+      dataFetchLatencyInfo["aarkService.fetchMarketStatuses"] =
+        Date.now() - strategyStart;
+    }),
+    cexService.fetchOpenOrders().then(() => {
+      dataFetchLatencyInfo["cexService.fetchOpenOrders"] =
+        Date.now() - strategyStart;
+    }),
+    ,
+    cexService.fetchPositions().then(() => {
+      dataFetchLatencyInfo["cexService.fetchPositions"] =
+        Date.now() - strategyStart;
+    }),
+    ,
+    cexService.fetchBalances().then(() => {
+      dataFetchLatencyInfo["cexService.fetchBalances"] =
+        Date.now() - strategyStart;
+    }),
+    ,
+    cexService.fetchOrderbooks().then(() => {
+      dataFetchLatencyInfo["cexService.fetchOrderbooks"] =
+        Date.now() - strategyStart;
+    }),
+    ,
+    cexService.fetchFundingRate().then(() => {
+      dataFetchLatencyInfo["cexService.fetchFundingRate"] =
+        Date.now() - strategyStart;
+    }),
+    ,
   ]);
   const dataFetchingTime = Date.now() - strategyStart;
+  console.log(JSON.stringify(dataFetchLatencyInfo));
   console.log(`Data fetched : ${dataFetchingTime}ms`);
   if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD) {
     await monitorService.slackMessage(
