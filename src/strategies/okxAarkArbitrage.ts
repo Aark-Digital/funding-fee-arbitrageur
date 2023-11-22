@@ -585,7 +585,8 @@ function calcEnterThreshold(
   const cexFundingAdjTerm =
     -sign *
     cexFundingRate.fundingRate *
-    ((cexFundingRate.fundingTime - ts) / EIGHT_HOUR_IN_MS) ** 2;
+    ((EIGHT_HOUR_IN_MS + ts - cexFundingRate.fundingTime) / EIGHT_HOUR_IN_MS) **
+      2;
   const aarkFundingAdjTerm =
     ((sign * EXPECTED_POSITION_INTERVAL) / ONE_DAY_IN_MS) * aarkFundingRate24h;
   return PRICE_DIFF_THRESHOLD + cexFundingAdjTerm + aarkFundingAdjTerm;
@@ -602,7 +603,9 @@ function calcExitThreshold(
   const cexFundingAdjTerm = -Math.max(
     -sign *
       cexFundingRate.fundingRate *
-      ((cexFundingRate.fundingTime - ts) / EIGHT_HOUR_IN_MS) ** 2,
+      ((EIGHT_HOUR_IN_MS + ts - cexFundingRate.fundingTime) /
+        EIGHT_HOUR_IN_MS) **
+        2,
     0
   );
   const aarkFundingAdjTerm = -Math.max(
