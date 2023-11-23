@@ -35,6 +35,7 @@ interface IArbSnapshot {
 const LOCAL_STATE: { [key: string]: any } = {
   unhedgedCnt: 0,
   lastOrderTimestamp: {},
+  premiumEMA: {},
 };
 
 const cexService = new OkxSwapService(
@@ -56,34 +57,45 @@ const aarkService = new AarkService(
 const monitorService = MonitorService.getInstance();
 
 const [
-  PRICE_DIFF_THRESHOLD,
+  EMA_WINDOW,
+
+  BASE_PRICE_DIFF_THRESHOLD,
+  MIN_PRICE_DIFF_THRESHOLD,
+
   MAX_POSITION_USDT,
-  UNHEDGED_THRESHOLD,
+  UNHEDGED_THRESHOLD_USDT,
   MAX_ORDER_USDT,
   MIN_ORDER_USDT,
-  MIN_ORDER_INTERVAL,
-  EXPECTED_POSITION_INTERVAL,
+  MIN_ORDER_INTERVAL_MS,
+  AARK_FUNDING_MULTIPLIER,
   MAX_MARKET_SKEWNESS_USDT,
+
   INITIAL_BALANCE_USDT,
   BALANCE_RATIO_IN_OKX,
   BALANCE_RATIO_IN_AARK,
   BALANCE_RATIO_DIFF_THRESHOLD,
 
-  DATA_FETCH_TIME_THRESHOLD,
+  DATA_FETCH_TIME_THRESHOLD_MS,
 ] = [
-  process.env.PRICE_DIFF_THRESHOLD!,
+  process.env.EMA_WINDOW!,
+
+  process.env.BASE_PRICE_DIFF_THRESHOLD!,
+  process.env.MIN_PRICE_DIFF_THRESHOLD!,
+
   process.env.MAX_POSITION_USDT!,
-  process.env.UNHEDGED_THRESHOLD!,
+  process.env.UNHEDGED_THRESHOLD_USDT!,
   process.env.MAX_ORDER_USDT!,
   process.env.MIN_ORDER_USDT!,
-  process.env.MIN_ORDER_INTERVAL!,
-  process.env.EXPECTED_POSITION_INTERVAL!,
+  process.env.MIN_ORDER_INTERVAL_MS!,
+  process.env.AARK_FUNDING_MULTIPLIER!,
   process.env.MAX_MARKET_SKEWNESS_USDT!,
+
   process.env.INITIAL_BALANCE_USDT!,
   process.env.BALANCE_RATIO_IN_OKX!,
   process.env.BALANCE_RATIO_IN_AARK!,
   process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
-  process.env.DATA_FETCH_TIME_THRESHOLD!,
+
+  process.env.DATA_FETCH_TIME_THRESHOLD_MS!,
 ].map((param: string) => parseFloat(param));
 
 export async function initializeStrategy() {
@@ -148,7 +160,7 @@ export async function strategy() {
   console.log(JSON.stringify(dataFetchLatencyInfo));
   Object.assign(arbSnapshot, { dataFetchingTime });
   console.log(`Data fetched : ${dataFetchingTime}ms`);
-  if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD) {
+  if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD_MS) {
     await monitorService.slackMessage(
       `Arbitrage : Data Error`,
       `Took too much time to fetch data : ${dataFetchingTime}ms.`,
@@ -219,6 +231,17 @@ export async function strategy() {
       const cexMidUSDT =
         (cexOrderbook.asks[0][0] + cexOrderbook.asks[0][0]) / 2;
 
+      updatePremiumEMA(
+        crypto,
+        cexOrderbook,
+        aarkMarketStatus,
+        aarkIndexPrice,
+        USDC_USDT_PRICE
+      );
+      Object.assign(arbitrageInfo, {
+        premiumEMA: LOCAL_STATE["premiumEMA"][crypto],
+      });
+
       const hedgeActionParams = getHedgeActionParam(
         crypto,
         unhedgedDetected,
@@ -256,6 +279,7 @@ export async function strategy() {
         orderSizeInAark = 0;
       }
       Object.assign(arbitrageInfo, {
+        usdcPrice: USDC_USDT_PRICE,
         cexAsk: cexOrderbook.asks[0][0],
         cexBid: cexOrderbook.bids[0][0],
         cexFundingRate: cexFundingRate,
@@ -383,6 +407,28 @@ async function checkBalance(
   }
 }
 
+function updatePremiumEMA(
+  crypto: string,
+  cexOrderbook: Orderbook,
+  aarkMarketStatus: IAarkMarketStatus,
+  aarkIndexPrice: number,
+  usdcPrice: number
+) {
+  const premiumEMA = LOCAL_STATE["premiumEMA"][crypto];
+
+  const premium =
+    ((aarkIndexPrice *
+      usdcPrice *
+      (1 + aarkMarketStatus.skewness / aarkMarketStatus.depthFactor / 100)) /
+      (cexOrderbook.asks[0][0] + cexOrderbook.bids[0][0])) *
+      2 -
+    1;
+  LOCAL_STATE["premiumEMA"][crypto] =
+    premiumEMA === undefined
+      ? premium
+      : premiumEMA * (1 - 1 / EMA_WINDOW) + premium / EMA_WINDOW;
+}
+
 function getHedgeActionParam(
   crypto: string,
   unhedgedDetected: string[][],
@@ -395,7 +441,7 @@ function getHedgeActionParam(
     (cexMarket.orderbook!.asks[0][0] + cexMarket.orderbook!.bids[0][0]) / 2;
   const hedgeActionParams: IActionParam[] = [];
   const unhedgedSize = cexPosition.size + aarkPosition.size;
-  if (Math.abs(unhedgedSize) * midPrice > UNHEDGED_THRESHOLD) {
+  if (Math.abs(unhedgedSize) * midPrice > UNHEDGED_THRESHOLD_USDT) {
     const absSizeToHedge = Math.min(
       Math.abs(unhedgedSize),
       MAX_ORDER_USDT / midPrice
@@ -431,40 +477,23 @@ function getArbAmountInAark(
   const aarkIndexPrice = aarkMarket.indexPrice!;
   const aarkPosition = aarkMarket.position!;
   const aarkFundingRate = aarkStatus.fundingRatePrice24h / aarkIndexPrice;
-  const positionPremium =
-    aarkPosition.size === 0
-      ? 0
-      : aarkPosition.size > 0
-      ? cexPosition.price / aarkPosition.price / usdcPrice - 1
-      : (aarkPosition.price * usdcPrice) / cexPosition.price - 1;
+
   const enterLongThreshold = calcEnterThreshold(
     cexFundingRate,
     aarkFundingRate,
+    LOCAL_STATE["premiumEMA"][crypto],
     true
   );
   const enterShortThreshold = calcEnterThreshold(
     cexFundingRate,
     aarkFundingRate,
+    -LOCAL_STATE["premiumEMA"][crypto],
     false
   );
-  const exitLongThreshold = calcExitThreshold(
-    cexFundingRate,
-    aarkFundingRate,
-    positionPremium,
-    true
-  );
-  const exitShortThreshold = calcExitThreshold(
-    cexFundingRate,
-    aarkFundingRate,
-    positionPremium,
-    false
-  );
+
   const thresholdInfo = {
     enterLong: round_dp(enterLongThreshold, 8),
     enterShort: round_dp(enterShortThreshold, 8),
-    exitLong: round_dp(exitLongThreshold, 8),
-    exitShort: round_dp(exitShortThreshold, 8),
-    usdcPrice,
   };
 
   let orderSizeInAark;
@@ -514,62 +543,13 @@ function getArbAmountInAark(
     ];
   }
 
-  if (aarkPosition.size !== 0) {
-    // EXIT AARK LONG (= AARK SHORT)
-    orderSizeInAark = _getArbSellAmountInAark(
-      cexOrderbook,
-      cexMarketInfo,
-      aarkStatus,
-      aarkIndexPrice,
-      exitLongThreshold,
-      usdcPrice
-    );
-    if (aarkPosition.size > 0 && orderSizeInAark < 0) {
-      // console.log(`EXIT LONG ${formatNumber(orderSizeInAark, 8)}`);
-      return [
-        _limitSellOrderSize(
-          orderSizeInAark,
-          cexMidUSDT,
-          aarkPosition.size,
-          aarkStatus.skewness,
-          true
-        ),
-        thresholdInfo,
-      ];
-    }
-
-    // EXIT AARK SHORT (= AARK LONG)
-    orderSizeInAark = _getArbBuyAmountInAark(
-      cexOrderbook,
-      cexMarketInfo,
-      aarkStatus,
-      aarkIndexPrice,
-      exitShortThreshold,
-      usdcPrice
-    );
-    if (aarkPosition.size < 0 && orderSizeInAark > 0) {
-      // console.log(`EXIT SHORT ${formatNumber(orderSizeInAark, 8)}`);
-      return [
-        _limitBuyOrderSize(
-          orderSizeInAark,
-          cexMidUSDT,
-          aarkPosition.size,
-          aarkStatus.skewness,
-          true
-        ),
-        thresholdInfo,
-      ];
-    }
-  } else {
-    return [0, thresholdInfo];
-  }
-
   return [0, thresholdInfo];
 }
 
 function calcEnterThreshold(
   cexFundingRate: FundingRate,
   aarkFundingRate24h: number,
+  ema: number,
   isLong: boolean // true = ENTER AARK LONG, false = ENTER AARK SHORT
 ): number {
   const ts = Date.now();
@@ -580,39 +560,13 @@ function calcEnterThreshold(
     ((EIGHT_HOUR_IN_MS + ts - cexFundingRate.fundingTime) / EIGHT_HOUR_IN_MS) **
       2;
   const aarkFundingAdjTerm =
-    ((sign * EXPECTED_POSITION_INTERVAL) / ONE_DAY_IN_MS) * aarkFundingRate24h;
-  return PRICE_DIFF_THRESHOLD + cexFundingAdjTerm + aarkFundingAdjTerm;
-}
-
-function calcExitThreshold(
-  cexFundingRate: FundingRate,
-  aarkFundingRate24h: number,
-  enterPricePremium: number,
-  isLong: boolean // true = EXIT AARK LONG = AARK SHORT, false = EXIT AARK SHORT = AARK LONG
-): number {
-  const ts = Date.now();
-  const sign = isLong ? 1 : -1;
-  const cexFundingAdjTerm = -Math.max(
-    -sign *
-      cexFundingRate.fundingRate *
-      ((EIGHT_HOUR_IN_MS + ts - cexFundingRate.fundingTime) /
-        EIGHT_HOUR_IN_MS) **
-        2,
-    0
-  );
-  const aarkFundingAdjTerm = -Math.max(
-    ((sign * EXPECTED_POSITION_INTERVAL) / ONE_DAY_IN_MS) * aarkFundingRate24h,
-    0
-  );
-  const positionPremiumAdjTerm = -Math.max(
-    enterPricePremium - PRICE_DIFF_THRESHOLD,
-    0
-  );
+    sign * AARK_FUNDING_MULTIPLIER * aarkFundingRate24h;
   return (
-    PRICE_DIFF_THRESHOLD +
-    cexFundingAdjTerm +
-    aarkFundingAdjTerm +
-    positionPremiumAdjTerm
+    ema +
+    Math.max(
+      BASE_PRICE_DIFF_THRESHOLD + cexFundingAdjTerm + aarkFundingAdjTerm,
+      MIN_PRICE_DIFF_THRESHOLD
+    )
   );
 }
 
@@ -755,37 +709,10 @@ function getMarketSummary(
   ];
 }
 
-async function logOrderInfoToSlack(
-  cexActionParams: IActionParam[],
-  aarkActionParams: IActionParam[],
-  arbSnapshot: IArbSnapshot[]
-) {
-  if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
-    const cryptoList = Array.from(
-      new Set(
-        cexActionParams
-          .concat(aarkActionParams)
-          .map((ap) => ap.symbol.split("_")[0])
-      )
-    ).join(",");
-    await monitorService.slackMessage(
-      `Arbitrage Detected : ${cryptoList}`,
-      `\n*CEX ORDER*\n${JSON.stringify(
-        cexActionParams
-      )}\n*AARK ORDER*\n${JSON.stringify(
-        aarkActionParams
-      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
-      false,
-      false,
-      true
-    );
-  }
-}
-
 function hadOrderRecently(crypto: string, timestamp: number) {
   if (
     LOCAL_STATE.lastOrderTimestamp[crypto] !== undefined &&
-    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - MIN_ORDER_INTERVAL
+    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - MIN_ORDER_INTERVAL_MS
   ) {
     console.log(crypto, LOCAL_STATE.lastOrderTimestamp[crypto], timestamp);
     return true;

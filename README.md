@@ -19,8 +19,12 @@ SLACK_PARAM={"url":"https://hooks.slack.com/services/xxxxxxxxx","messageInterval
 
 // Markets to arbitrage
 TARGET_CRYPTO_LIST=[]
+// EMA weight parameter, weight of new value will be 1 / EMA_WINDOW
+EMA_WINDOW
 // Base threshold for price difference ratio
-PRICE_DIFF_THRESHOLD=0.0004
+BASE_PRICE_DIFF_THRESHOLD=0.0004
+// MIN diff threshold from ema premium
+MIN_PRICE_DIFF_THRESHOLD=0.0002
 // Max position value in USDT for each market
 MAX_POSITION_USDT=1000000
 // Max order value in USDT for each order
@@ -28,11 +32,11 @@ MAX_ORDER_USDT=100000
 // Min order value in USDT for each order.
 MIN_ORDER_USDT=10000
 // Min interval between adjacent order in each market, (to prevent fast,useless position swap)
-MIN_ORDER_INTERVAL=60000
+MIN_ORDER_INTERVAL_MS=60000
 // Unhedged value threshold in USDT for each market
-UNHEDGED_THRESHOLD=10
-// Expected position opening time. Used to calculate enter & exit threshold.
-EXPECTED_POSITION_INTERVAL=14400000
+UNHEDGED_THRESHOLD_USDT=10
+// Multiplier for aarkFunding adjustment term when calculating enter threshold
+AARK_FUNDING_MULTIPLIER=1
 // Max allowed market skewnes value in USDT. Arbitrageur try to reduce each market's skewness under this value if possible.
 MAX_MARKET_SKEWNESS_USDT=30000
 
@@ -46,7 +50,7 @@ BALANCE_RATIO_IN_AARK=0.5
 BALANCE_RATIO_DIFF_THRESHOLD=0.2
 
 // Max elapsed to time for fetching data.
-DATA_FETCH_TIME_THRESHOLD=1000
+DATA_FETCH_TIME_THRESHOLD_MS=1000
 
 // URL for making order in aark via One Click Trading
 OCT_BACKEND_URL=https://xxxxx
