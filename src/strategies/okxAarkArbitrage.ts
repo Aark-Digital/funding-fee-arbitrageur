@@ -101,7 +101,7 @@ export async function strategy() {
   const unhedgedDetected: string[][] = [
     ["crypto", "pos_cex", "pos_a", "unhedged value ($)"],
   ];
-  const arbSnapshot: IArbSnapshot[] = [];
+  const arbSnapshot: any = {};
   const dataFetchLatencyInfo: { [key: string]: number } = {};
   const strategyStart = Date.now();
   await Promise.all([
@@ -254,21 +254,23 @@ export async function strategy() {
       if (Math.abs(orderSizeInAark) * cexMidUSDT < MIN_ORDER_USDT) {
         orderSizeInAark = 0;
       }
+      Object.assign(arbitrageInfo, {
+        cexAsk: cexOrderbook.asks[0][0],
+        cexBid: cexOrderbook.bids[0][0],
+        cexFundingRate: cexFundingRate,
+        cexPosition,
+        aarkPosition,
+        aarkMarketStatus,
+        aarkIndexPrice,
+        orderSizeInAark,
+        timestamp: Date.now(),
+      });
+      console.log(JSON.stringify(arbitrageInfo));
       if (
         orderSizeInAark !== 0 &&
         !hadOrderRecently(crypto, timestamp) &&
         !arbitrageFound
       ) {
-        arbSnapshot.push({
-          timestamp,
-          crypto,
-          orderSizeInAark,
-          bestAsk: cexOrderbook.asks[0],
-          bestBid: cexOrderbook.bids[0],
-          usdcUsdtPrice: USDC_USDT_PRICE,
-          aarkIndexPrice,
-          aarkMarketSkewness: aarkMarketStatus.skewness,
-        });
         addCreateMarketParams(cexActionParams, [
           {
             symbol: `${crypto}_USDT`,
@@ -283,19 +285,8 @@ export async function strategy() {
         ]);
         updateLastOrderTimestamp(crypto, timestamp);
         arbitrageFound = true;
+        Object.assign(arbSnapshot, arbitrageInfo);
       }
-
-      Object.assign(arbitrageInfo, {
-        cexAsk: cexOrderbook.asks[0][0],
-        cexBid: cexOrderbook.bids[0][0],
-        cexFundingRate: cexFundingRate,
-        cexPosition,
-        aarkPosition,
-        aarkMarketStatus,
-        aarkIndexPrice,
-        timestamp: Date.now(),
-      });
-      console.log(JSON.stringify(arbitrageInfo));
     } catch (e) {
       console.log("Failed to get market action params : ", e);
       continue;
