@@ -741,7 +741,7 @@ async function logOrderInfoToSlack(
       )}\n*AARK ORDER*\n${JSON.stringify(
         aarkActionParams
       )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
-      false,
+      true,
       false,
       true
     );
