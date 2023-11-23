@@ -721,6 +721,33 @@ function hadOrderRecently(crypto: string, timestamp: number) {
   }
 }
 
+async function logOrderInfoToSlack(
+  cexActionParams: IActionParam[],
+  aarkActionParams: IActionParam[],
+  arbSnapshot: IArbSnapshot[]
+) {
+  if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
+    const cryptoList = Array.from(
+      new Set(
+        cexActionParams
+          .concat(aarkActionParams)
+          .map((ap) => ap.symbol.split("_")[0])
+      )
+    ).join(",");
+    await monitorService.slackMessage(
+      `Arbitrage Detected : ${cryptoList}`,
+      `\n*CEX ORDER*\n${JSON.stringify(
+        cexActionParams
+      )}\n*AARK ORDER*\n${JSON.stringify(
+        aarkActionParams
+      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
+      false,
+      false,
+      true
+    );
+  }
+}
+
 function updateLastOrderTimestamp(crypto: string, timestamp: number) {
   LOCAL_STATE.lastOrderTimestamp[crypto] = timestamp;
 }
