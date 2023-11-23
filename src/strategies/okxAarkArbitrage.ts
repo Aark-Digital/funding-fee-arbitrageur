@@ -146,6 +146,7 @@ export async function strategy() {
   ]);
   const dataFetchingTime = Date.now() - strategyStart;
   console.log(JSON.stringify(dataFetchLatencyInfo));
+  Object.assign(arbSnapshot, { dataFetchingTime });
   console.log(`Data fetched : ${dataFetchingTime}ms`);
   if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD) {
     await monitorService.slackMessage(
