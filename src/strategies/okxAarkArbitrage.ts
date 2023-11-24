@@ -161,13 +161,6 @@ export async function strategy() {
   Object.assign(arbSnapshot, { dataFetchingTime });
   console.log(`Data fetched : ${dataFetchingTime}ms`);
   if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD_MS) {
-    await monitorService.slackMessage(
-      `Arbitrage : Data Error`,
-      `Took too much time to fetch data : ${dataFetchingTime}ms.`,
-      false,
-      false,
-      true
-    );
     return;
   }
 
