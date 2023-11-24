@@ -487,7 +487,7 @@ function getArbAmountInAark(
   const enterShortThreshold = calcEnterThreshold(
     cexFundingRate,
     aarkFundingRate,
-    -LOCAL_STATE["premiumEMA"][crypto],
+    LOCAL_STATE["premiumEMA"][crypto],
     false
   );
 
@@ -562,7 +562,7 @@ function calcEnterThreshold(
   const aarkFundingAdjTerm =
     sign * AARK_FUNDING_MULTIPLIER * aarkFundingRate24h;
   return (
-    ema +
+    -sign * ema +
     Math.max(
       BASE_PRICE_DIFF_THRESHOLD + cexFundingAdjTerm + aarkFundingAdjTerm,
       MIN_PRICE_DIFF_THRESHOLD
