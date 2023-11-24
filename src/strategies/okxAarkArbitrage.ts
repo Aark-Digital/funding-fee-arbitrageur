@@ -499,7 +499,7 @@ function getArbAmountInAark(
     enterLongThreshold,
     usdcPrice
   );
-  if (aarkStatus.skewness < 0 && orderSizeInAark > 0) {
+  if (orderSizeInAark > 0) {
     // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
     return [
       _limitBuyOrderSize(
@@ -522,7 +522,7 @@ function getArbAmountInAark(
     enterShortThreshold,
     usdcPrice
   );
-  if (aarkStatus.skewness > 0 && orderSizeInAark < 0) {
+  if (orderSizeInAark < 0) {
     // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
     return [
       _limitSellOrderSize(
