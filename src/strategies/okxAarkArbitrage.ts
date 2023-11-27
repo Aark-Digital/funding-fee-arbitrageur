@@ -241,10 +241,14 @@ export async function strategy() {
         cexMarket,
         aarkMarket
       );
-      if (hedgeActionParams.length !== 0) {
+      if (
+        hedgeActionParams.length !== 0 &&
+        !hadOrderRecently(crypto, timestamp, 20_000)
+      ) {
         hedged = false;
-        cexActionParams.push(...hedgeActionParams);
-        continue;
+        aarkActionParams.push(...hedgeActionParams);
+        updateLastOrderTimestamp(crypto, timestamp);
+        break;
       }
 
       let [orderSizeInAark, thresholdInfo] = getArbAmountInAark(
@@ -324,19 +328,6 @@ export async function strategy() {
     );
   }
 
-  if (!hedged) {
-    LOCAL_STATE.unhedgedCnt += 1;
-    if (LOCAL_STATE.unhedgedCnt >= 10) {
-      await monitorService.slackMessage(
-        `ARBITRAGEUR UNHEDGED`,
-        `Unhedged for ${LOCAL_STATE.unhedgedCnt} iteration`,
-        true,
-        true
-      );
-      LOCAL_STATE.unhedgedCnt = 0;
-    }
-  }
-
   logActionParams(cexActionParams);
   logActionParams(aarkActionParams);
 
@@ -345,7 +336,16 @@ export async function strategy() {
     aarkService.executeOrders(aarkActionParams),
   ]);
   console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
-  await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+  if (!hedged) {
+    await monitorService.slackMessage(
+      `ARBITRAGEUR UNHEDGED`,
+      `Unhedged for ${LOCAL_STATE.unhedgedCnt} iteration`,
+      true,
+      true
+    );
+  } else {
+    await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
+  }
 }
 
 async function checkBalance(
@@ -441,8 +441,11 @@ function getHedgeActionParam(
     );
     addCreateMarketParams(hedgeActionParams, [
       {
-        symbol: `${crypto}_USDT`,
-        size: unhedgedSize < 0 ? absSizeToHedge : -absSizeToHedge,
+        symbol: `${crypto}_USDC`,
+        size: applyQtyPrecision(
+          unhedgedSize < 0 ? absSizeToHedge : -absSizeToHedge,
+          [aarkMarket.marketInfo]
+        ),
       },
     ]);
     unhedgedDetected.push([
@@ -702,10 +705,14 @@ function getMarketSummary(
   ];
 }
 
-function hadOrderRecently(crypto: string, timestamp: number) {
+function hadOrderRecently(
+  crypto: string,
+  timestamp: number,
+  interval: number = MIN_ORDER_INTERVAL_MS
+) {
   if (
     LOCAL_STATE.lastOrderTimestamp[crypto] !== undefined &&
-    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - MIN_ORDER_INTERVAL_MS
+    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - interval
   ) {
     console.log(crypto, LOCAL_STATE.lastOrderTimestamp[crypto], timestamp);
     return true;
