@@ -30,13 +30,26 @@ const symbolIdMap: { [symbol: string]: number } = {
   SOL: 7,
   USDT: 8,
   DOGE: 9,
-  LINK: 10,
+  ADA: 12,
+  ATOM: 13,
+  LTC: 14,
+  AVAX: 15,
+  DOT: 16,
+  ETC: 17,
+  BCH: 18,
+  FIL: 19,
+  NEAR: 20,
+  DYDX: 21,
 };
 
 const collateralAddressMap: { [symbol: string]: string } = {
   "0x17FC002b466eEc40DaE837Fc4bE5c67993ddBd6F": "FRAX",
   "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f": "BTC",
   "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1": "ETH",
+  "0x5979D7b546E38E414F7E9822514be443A4800529": "WSTETH",
+  "0x912CE59144191C1204E64559FE8253a0e49E6548": "ARB",
+  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9": "USDT",
+  "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1": "DAI",
 };
 
 export class AarkService {
