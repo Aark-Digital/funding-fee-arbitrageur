@@ -1,4 +1,4 @@
-import { checkObjectKeys } from "src/utils/env";
+import { checkObjectKeys } from "../utils/env";
 import {
   FundingRate,
   Orderbook,
