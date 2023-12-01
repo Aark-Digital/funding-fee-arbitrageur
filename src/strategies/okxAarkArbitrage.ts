@@ -189,26 +189,23 @@ export class Strategy {
     this._logActionParams(okxActionParams);
     this._logActionParams(aarkActionParams);
 
-    // await Promise.all([
-    //   this.okxService.executeOrders(okxActionParams),
-    //   this.aarkService.executeOrders(aarkActionParams),
-    // ]);
+    await Promise.all([
+      this.okxService.executeOrders(okxActionParams),
+      this.aarkService.executeOrders(aarkActionParams),
+    ]);
 
     console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
-    // if (!hedged) {
-    //   await this.monitorService.slackMessage(
-    //     `ARBITRAGEUR UNHEDGED`,
-    //     `Unhedged for ${this.localState.unhedgedCnt} iteration`,
-    //     true,
-    //     true
-    //   );
-    // } else {
-    //   this._logOrderInfoToSlack(
-    //     okxActionParams,
-    //     aarkActionParams,
-    //     arbSnapshot
-    //   );
-    // }
+    if (!hedged) {
+      await this.monitorService.slackMessage(
+        `ARBITRAGEUR UNHEDGED`,
+        `Unhedged for ${this.localState.unhedgedCnt} iteration`,
+        60_000,
+        true,
+        true
+      );
+    } else {
+      this._logOrderInfoToSlack(okxActionParams, aarkActionParams, arbSnapshot);
+    }
 
     return;
   }
@@ -702,9 +699,9 @@ export class Strategy {
         )}\n*AARK ORDER*\n${JSON.stringify(
           aarkActionParams
         )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
+        0,
         true,
-        false,
-        true
+        false
       );
     }
   }
