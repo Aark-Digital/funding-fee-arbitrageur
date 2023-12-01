@@ -19,17 +19,15 @@ async function main() {
   if (Number.isNaN(strategyPeriodMs)) {
     throw new Error("Undefined Strategy periods");
   }
-  const {
-    strategy,
-    initializeStrategy,
-  } = require(`./strategies/${process.env.STRATEGY}`);
+  const { Strategy } = require(`./strategies/${process.env.STRATEGY_NAME}`);
 
-  await initializeStrategy();
+  const strategy = new Strategy();
+  await strategy.init();
 
   while (true) {
     try {
       console.log(`~~~~~~~ ${new Date().toISOString()} ~~~~~~~`);
-      await strategy();
+      await strategy.run();
     } catch (e) {
       console.log(e);
     }

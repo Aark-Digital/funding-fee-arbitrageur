@@ -1,3 +1,4 @@
+import _ from "lodash";
 export function loadStrategyEnv(): number[] {
   return [
     process.env.PRICE_DIFF_THRESHOLD!,
@@ -9,4 +10,15 @@ export function loadStrategyEnv(): number[] {
 
 export function loadTargetMarketSymbols(): string[] {
   return JSON.parse(process.env.TARGET_MARKETS!);
+}
+
+export function checkObjectKeys(objList: any[], keys: string[]) {
+  const targetKeySet = new Set(keys);
+  for (const obj of objList) {
+    const keySet = new Set(Object.keys(obj));
+    if (!_.isEqual(targetKeySet, keySet)) {
+      return false;
+    }
+  }
+  return true;
 }

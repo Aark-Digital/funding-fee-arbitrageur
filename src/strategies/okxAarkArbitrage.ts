@@ -1,5 +1,5 @@
+import { checkObjectKeys } from "src/utils/env";
 import {
-  Balance,
   FundingRate,
   Orderbook,
   Position,
@@ -12,288 +12,164 @@ import {
 } from "../interfaces/market-interface";
 import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
+import { MonitorService } from "../services/monitor.service";
 import { OkxSwapService } from "../services/okx.service";
-import { logActionParams } from "../utils/logger";
 import { formatNumber, round_dp } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
-import { validateAndReturnData } from "../utils/validation";
-import { table } from "table";
-import { MonitorService } from "../services/monitor.service";
-import { ONE_DAY_IN_MS, EIGHT_HOUR_IN_MS } from "../utils/time";
+import { EIGHT_HOUR_IN_MS } from "../utils/time";
+import { isValidData } from "../utils/validation";
 
-interface IArbSnapshot {
-  timestamp: number;
-  crypto: string;
-  orderSizeInAark: number;
-  bestAsk: [number, number];
-  bestBid: [number, number];
-  usdcUsdtPrice: number;
-  aarkIndexPrice: number;
-  aarkMarketSkewness: number;
-}
+export class Strategy {
+  private readonly aarkService: AarkService;
+  private readonly okxService: OkxSwapService;
+  private readonly monitorService = MonitorService.getInstance();
+  private params: any = {};
+  private readonly localState = {
+    unhedgedCnt: 0,
+    lastOrderTimestamp: {} as { [key: string]: number },
+    premiumEMA: {} as { [key: string]: { value: number; weight: number } },
+    arbSnapshot: {},
+  };
 
-const LOCAL_STATE: { [key: string]: any } = {
-  unhedgedCnt: 0,
-  lastOrderTimestamp: {},
-  premiumEMA: {},
-};
-
-const cexService = new OkxSwapService(
-  process.env.OKX_API_KEY!,
-  process.env.OKX_API_SECRET!,
-  process.env.OKX_API_PASSWORD!,
-  JSON.parse(process.env.TARGET_CRYPTO_LIST!)
-    .map((symbol: string) => `${symbol}_USDT`)
-    .concat(["USDC_USDT"])
-);
-
-const aarkService = new AarkService(
-  process.env.ARBITRAGEUR_PK!,
-  JSON.parse(process.env.TARGET_CRYPTO_LIST!).map(
-    (symbol: string) => `${symbol}_USDC`
-  )
-);
-
-const monitorService = MonitorService.getInstance();
-
-const [
-  EMA_WINDOW,
-
-  BASE_PRICE_DIFF_THRESHOLD,
-  MIN_PRICE_DIFF_THRESHOLD,
-
-  MAX_POSITION_USDT,
-  UNHEDGED_THRESHOLD_USDT,
-  MAX_ORDER_USDT,
-  MIN_ORDER_USDT,
-  MIN_ORDER_INTERVAL_MS,
-  AARK_FUNDING_MULTIPLIER,
-  MAX_MARKET_SKEWNESS_USDT,
-
-  INITIAL_BALANCE_USDT,
-  BALANCE_RATIO_IN_OKX,
-  BALANCE_RATIO_IN_AARK,
-  BALANCE_RATIO_DIFF_THRESHOLD,
-
-  DATA_FETCH_TIME_THRESHOLD_MS,
-] = [
-  process.env.EMA_WINDOW!,
-
-  process.env.BASE_PRICE_DIFF_THRESHOLD!,
-  process.env.MIN_PRICE_DIFF_THRESHOLD!,
-
-  process.env.MAX_POSITION_USDT!,
-  process.env.UNHEDGED_THRESHOLD_USDT!,
-  process.env.MAX_ORDER_USDT!,
-  process.env.MIN_ORDER_USDT!,
-  process.env.MIN_ORDER_INTERVAL_MS!,
-  process.env.AARK_FUNDING_MULTIPLIER!,
-  process.env.MAX_MARKET_SKEWNESS_USDT!,
-
-  process.env.INITIAL_BALANCE_USDT!,
-  process.env.BALANCE_RATIO_IN_OKX!,
-  process.env.BALANCE_RATIO_IN_AARK!,
-  process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
-
-  process.env.DATA_FETCH_TIME_THRESHOLD_MS!,
-].map((param: string) => parseFloat(param));
-
-export async function initializeStrategy() {
-  await cexService.init();
-  await aarkService.init();
-}
-
-export async function strategy() {
-  const timestamp = Date.now();
-  const cexActionParams: IActionParam[] = [];
-  const aarkActionParams: IActionParam[] = [];
-  const marketSummary: string[][] = [
-    ["crypto", "Pm_ex%", "Pm_skew%", "$Skew", "Fr24h%", "$avl.Value"],
-  ];
-  const unhedgedDetected: string[][] = [
-    ["crypto", "pos_cex", "pos_a", "unhedged value ($)"],
-  ];
-  const arbSnapshot: any = {};
-  const dataFetchLatencyInfo: { [key: string]: number } = {};
-  const strategyStart = Date.now();
-  await Promise.all([
-    aarkService.fetchIndexPrices().then(() => {
-      dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
-        Date.now() - strategyStart;
-    }),
-    aarkService.fetchUserStatus().then(() => {
-      dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-    aarkService.fetchMarketStatuses().then(() => {
-      dataFetchLatencyInfo["aarkService.fetchMarketStatuses"] =
-        Date.now() - strategyStart;
-    }),
-    cexService.fetchOpenOrders().then(() => {
-      dataFetchLatencyInfo["cexService.fetchOpenOrders"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-    cexService.fetchPositions().then(() => {
-      dataFetchLatencyInfo["cexService.fetchPositions"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-    cexService.fetchBalances().then(() => {
-      dataFetchLatencyInfo["cexService.fetchBalances"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-    cexService.fetchOrderbooks().then(() => {
-      dataFetchLatencyInfo["cexService.fetchOrderbooks"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-    cexService.fetchFundingRate().then(() => {
-      dataFetchLatencyInfo["cexService.fetchFundingRate"] =
-        Date.now() - strategyStart;
-    }),
-    ,
-  ]);
-  const dataFetchingTime = Date.now() - strategyStart;
-  console.log(JSON.stringify(dataFetchLatencyInfo));
-  Object.assign(arbSnapshot, { dataFetchingTime });
-  console.log(`Data fetched : ${dataFetchingTime}ms`);
-  if (dataFetchingTime > DATA_FETCH_TIME_THRESHOLD_MS) {
-    return;
+  constructor() {
+    this._readEnvParams();
+    const targetCryptoList = Object.keys(this.params.MARKET_PARAMS);
+    this.aarkService = new AarkService(
+      process.env.ARBITRAGEUR_PK!,
+      targetCryptoList.map((symbol: string) => `${symbol}_USDC`)
+    );
+    this.okxService = new OkxSwapService(
+      process.env.OKX_API_KEY!,
+      process.env.OKX_API_SECRET!,
+      process.env.OKX_API_PASSWORD!,
+      targetCryptoList
+        .map((symbol: string) => `${symbol}_USDT`)
+        .concat(["USDC_USDT"])
+    );
   }
 
-  const cexInfo = cexService.getMarketInfo();
-  const aarkInfo = aarkService.getMarketInfo();
-  const cryptoList: string[] = JSON.parse(process.env.TARGET_CRYPTO_LIST!);
-
-  const cexUSDCInfo = cexInfo[`USDC_USDT`].orderbook;
-  if (cexUSDCInfo === undefined) {
-    throw new Error(`[Data Fetch Fail] Failed to fetch USDC market Info`);
+  async init() {
+    await this.okxService.init();
+    await this.aarkService.init();
   }
 
-  const cexBalance = cexService.getBalance();
-  if (cexBalance === undefined) {
-    throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
-  }
+  async run() {
+    const strategyStart = Date.now();
+    const arbSnapshot: any = {};
+    const marketParams = this.params.MARKET_PARAMS;
+    const okxActionParams: IActionParam[] = [];
+    const aarkActionParams: IActionParam[] = [];
 
-  const aarkBalance = aarkService.getBalance();
-  if (aarkBalance === undefined) {
-    throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
-  }
+    if (!(await this._fetchData())) {
+      return;
+    }
+    this._checkBalance();
 
-  const USDC_USDT_PRICE = (cexUSDCInfo.asks[0][0] + cexUSDCInfo.bids[0][0]) / 2;
-  await checkBalance(cexBalance, aarkBalance, USDC_USDT_PRICE);
-  let hedged = true;
-  let arbitrageFound = false;
-  for (const crypto of cryptoList) {
-    try {
-      const arbitrageInfo: any = {
+    const okxMarkets = this.okxService.getMarketInfo();
+    const aarkMarkets = this.aarkService.getMarketInfo();
+
+    const cryptoList: string[] = Object.keys(marketParams);
+    const okxUSDCOrderbook = okxMarkets[`USDC_USDT`].orderbook!;
+    const USDC_USDT_PRICE =
+      (okxUSDCOrderbook.asks[0][0] + okxUSDCOrderbook.bids[0][0]) / 2;
+
+    let hedged = true;
+    let arbitrageFound = false;
+    const detectionStart = Date.now();
+    for (const crypto of cryptoList) {
+      const marketArbitrageInfo: any = {
         crypto,
       };
-      const cexMarket = cexInfo[`${crypto}_USDT`];
-      const aarkMarket = aarkInfo[`${crypto}_USDC`];
+      const okxMarket = okxMarkets[`${crypto}_USDT`];
+      const aarkMarket = aarkMarkets[`${crypto}_USDC`];
 
-      const [
-        cexPosition,
-        cexOrderbook,
-        cexFundingRate,
-        aarkPosition,
-        aarkMarketStatus,
-        aarkIndexPrice,
-      ]: [
-        Position,
-        Orderbook,
-        FundingRate,
-        Position,
-        IAarkMarketStatus,
-        number
-      ] = validateAndReturnData(
-        [
-          cexMarket.position,
-          cexMarket.orderbook,
-          cexMarket.fundingRate,
-          aarkMarket.position,
-          aarkMarket.marketStatus,
-          aarkMarket.indexPrice,
-        ],
-        10000
-      );
+      if (
+        !isValidData(
+          [
+            okxMarket.position,
+            okxMarket.orderbook,
+            okxMarket.fundingRate,
+            aarkMarket.position,
+            aarkMarket.marketStatus,
+            aarkMarket.indexPrice,
+          ],
+          10000
+        )
+      ) {
+        this.monitorService.slackMessage(
+          "Data Validation Fail",
+          "",
+          false,
+          false,
+          false
+        );
+        continue;
+      }
+      const okxOrderbook = okxMarket.orderbook!;
+      const okxMidUSDT =
+        (okxOrderbook.asks[0][0] + okxOrderbook.bids[0][0]) / 2;
 
-      const cexMidUSDT =
-        (cexOrderbook.asks[0][0] + cexOrderbook.asks[0][0]) / 2;
-
-      updatePremiumEMA(
-        crypto,
-        cexOrderbook,
-        aarkMarketStatus,
-        aarkIndexPrice,
-        USDC_USDT_PRICE
-      );
-      Object.assign(arbitrageInfo, {
-        premiumEMA: LOCAL_STATE["premiumEMA"][crypto],
+      this._updatePremiumEMA(crypto, okxMarket, aarkMarket, USDC_USDT_PRICE);
+      Object.assign(marketArbitrageInfo, {
+        premiumEMA: this.localState.premiumEMA[crypto].value,
       });
 
-      const hedgeActionParams = getHedgeActionParam(
+      const hedgeActionParams = this._getHedgeActionParam(
         crypto,
-        unhedgedDetected,
-        cexMarket,
+        okxMarket,
         aarkMarket
       );
       if (
         hedgeActionParams.length !== 0 &&
-        !hadOrderRecently(crypto, timestamp, 20_000)
+        !this._hadOrderRecently(crypto, detectionStart, 20_000)
       ) {
         hedged = false;
         aarkActionParams.push(...hedgeActionParams);
-        updateLastOrderTimestamp(crypto, timestamp);
+        this._updateLastOrderTimestamp(crypto, detectionStart);
         break;
       }
 
-      let [orderSizeInAark, thresholdInfo] = getArbAmountInAark(
+      let [orderSizeInAark, thresholdInfo] = this._getArbAmountInAark(
         crypto,
-        cexMarket,
+        okxMarket,
         aarkMarket,
         USDC_USDT_PRICE
       );
-      Object.assign(arbitrageInfo, thresholdInfo);
+      Object.assign(marketArbitrageInfo, thresholdInfo);
 
-      marketSummary.push(
-        getMarketSummary(
-          crypto,
-          cexMarket,
-          aarkMarket,
-          USDC_USDT_PRICE,
-          orderSizeInAark
-        )
-      );
       orderSizeInAark = applyQtyPrecision(orderSizeInAark, [
-        cexMarket.marketInfo,
+        okxMarket.marketInfo,
         aarkMarket.marketInfo,
       ]);
-      if (Math.abs(orderSizeInAark) * cexMidUSDT < MIN_ORDER_USDT) {
+      if (
+        Math.abs(orderSizeInAark) * okxMidUSDT <
+        marketParams.MIN_ORDER_USDT
+      ) {
         orderSizeInAark = 0;
       }
-      Object.assign(arbitrageInfo, {
+      Object.assign(marketArbitrageInfo, {
         usdcPrice: USDC_USDT_PRICE,
-        cexAsk: cexOrderbook.asks[0][0],
-        cexBid: cexOrderbook.bids[0][0],
-        cexFundingRate: cexFundingRate,
-        cexPosition,
-        aarkPosition,
-        aarkMarketStatus,
-        aarkIndexPrice,
+        okxAsk: okxOrderbook.asks[0][0],
+        okxBid: okxOrderbook.bids[0][0],
+        okxFundingRate: okxMarket.fundingRate,
+        okxPosition: okxMarket.position,
+        aarkPosition: aarkMarket.position,
+        aarkMarketStatus: aarkMarket.marketStatus,
+        aarkIndexPrice: aarkMarket.indexPrice,
         orderSizeInAark,
         timestamp: Date.now(),
       });
-      console.log(JSON.stringify(arbitrageInfo));
+      console.log(JSON.stringify(marketArbitrageInfo));
       if (
         orderSizeInAark !== 0 &&
-        !hadOrderRecently(crypto, timestamp) &&
+        !this._hadOrderRecently(
+          crypto,
+          detectionStart,
+          marketParams[crypto].MIN_ORDER_INTERVAL_MS
+        ) &&
         !arbitrageFound
       ) {
-        addCreateMarketParams(cexActionParams, [
+        addCreateMarketParams(okxActionParams, [
           {
             symbol: `${crypto}_USDT`,
             size: -orderSizeInAark,
@@ -305,449 +181,531 @@ export async function strategy() {
             size: orderSizeInAark,
           },
         ]);
-        updateLastOrderTimestamp(crypto, timestamp);
+        this._updateLastOrderTimestamp(crypto, detectionStart);
         arbitrageFound = true;
-        Object.assign(arbSnapshot, arbitrageInfo);
+        Object.assign(arbSnapshot, marketArbitrageInfo);
       }
-    } catch (e) {
-      console.log("Failed to get market action params : ", e);
-      continue;
+    }
+    this._logActionParams(okxActionParams);
+    this._logActionParams(aarkActionParams);
+
+    // await Promise.all([
+    //   this.okxService.executeOrders(okxActionParams),
+    //   this.aarkService.executeOrders(aarkActionParams),
+    // ]);
+
+    console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
+    // if (!hedged) {
+    //   await this.monitorService.slackMessage(
+    //     `ARBITRAGEUR UNHEDGED`,
+    //     `Unhedged for ${this.localState.unhedgedCnt} iteration`,
+    //     true,
+    //     true
+    //   );
+    // } else {
+    //   this._logOrderInfoToSlack(
+    //     okxActionParams,
+    //     aarkActionParams,
+    //     arbSnapshot
+    //   );
+    // }
+
+    return;
+  }
+
+  _readEnvParams() {
+    const [
+      INITIAL_BALANCE_USDT,
+      BALANCE_RATIO_IN_OKX,
+      BALANCE_RATIO_IN_AARK,
+      BALANCE_RATIO_DIFF_THRESHOLD,
+
+      DATA_FETCH_TIME_THRESHOLD_MS,
+    ] = [
+      process.env.INITIAL_BALANCE_USDT!,
+      process.env.BALANCE_RATIO_IN_OKX!,
+      process.env.BALANCE_RATIO_IN_AARK!,
+      process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
+
+      process.env.DATA_FETCH_TIME_THRESHOLD_MS!,
+    ].map((param: string) => parseFloat(param));
+
+    const MARKET_PARAMS = JSON.parse(process.env.MARKET_PARAMS!);
+    if (
+      !checkObjectKeys(Object.values(MARKET_PARAMS), [
+        "EMA_WINDOW",
+        "BASE_PRICE_DIFF_THRESHOLD",
+        "MIN_PRICE_DIFF_THRESHOLD",
+        "MAX_POSITION_USDT",
+        "MAX_ORDER_USDT",
+        "MIN_ORDER_USDT",
+        "MIN_ORDER_INTERVAL_MS",
+        "UNHEDGED_THRESHOLD_USDT",
+        "AARK_FUNDING_MULTIPLIER",
+        "MAX_MARKET_SKEWNESS_USDT",
+      ])
+    ) {
+      throw new Error("Market key test failed. Check keys for each param.");
+    }
+    this.params = {
+      INITIAL_BALANCE_USDT,
+      BALANCE_RATIO_IN_OKX,
+      BALANCE_RATIO_IN_AARK,
+      BALANCE_RATIO_DIFF_THRESHOLD,
+      DATA_FETCH_TIME_THRESHOLD_MS,
+      MARKET_PARAMS,
+    };
+  }
+
+  async _fetchData(): Promise<boolean> {
+    const timestamp = Date.now();
+    const dataFetchLatencyInfo: { [key: string]: number } = {};
+    await Promise.all([
+      this.aarkService.fetchIndexPrices().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
+          Date.now() - timestamp;
+      }),
+      this.aarkService.fetchUserStatus().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+          Date.now() - timestamp;
+      }),
+      ,
+      this.aarkService.fetchMarketStatuses().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchMarketStatuses"] =
+          Date.now() - timestamp;
+      }),
+      this.okxService.fetchOpenOrders().then(() => {
+        dataFetchLatencyInfo["okxService.fetchOpenOrders"] =
+          Date.now() - timestamp;
+      }),
+      ,
+      this.okxService.fetchPositions().then(() => {
+        dataFetchLatencyInfo["okxService.fetchPositions"] =
+          Date.now() - timestamp;
+      }),
+      ,
+      this.okxService.fetchBalances().then(() => {
+        dataFetchLatencyInfo["okxService.fetchBalances"] =
+          Date.now() - timestamp;
+      }),
+      ,
+      this.okxService.fetchOrderbooks().then(() => {
+        dataFetchLatencyInfo["okxService.fetchOrderbooks"] =
+          Date.now() - timestamp;
+      }),
+      ,
+      this.okxService.fetchFundingRate().then(() => {
+        dataFetchLatencyInfo["okxService.fetchFundingRate"] =
+          Date.now() - timestamp;
+      }),
+      ,
+    ]);
+    const dataFetchingTime = Date.now() - timestamp;
+    console.log(JSON.stringify(dataFetchLatencyInfo));
+    Object.assign(this.localState.arbSnapshot, { dataFetchingTime });
+    console.log(`Data fetched : ${dataFetchingTime}ms`);
+    if (dataFetchingTime > this.params.DATA_FETCH_TIME_THRESHOLD_MS) {
+      return false;
+    } else {
+      return true;
     }
   }
 
-  if (process.env.DEBUG_MODE === "1") {
+  _checkBalance() {
+    const okxBalance = this.okxService.getBalance();
+    if (okxBalance === undefined) {
+      throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
+    }
+
+    const aarkBalance = this.aarkService.getBalance();
+    if (aarkBalance === undefined) {
+      throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
+    }
+
+    const okxBalanceUSDT = okxBalance
+      .filter((balance) => balance.currency === "USDT")
+      .reduce((acc, balance) => acc + balance.total, 0);
+    const aarkBalanceUSDC = aarkBalance
+      .filter((balance) => balance.currency === "USDC")
+      .reduce((acc, balance) => acc + balance.total, 0);
     console.log(
-      table(unhedgedDetected, {
-        header: { alignment: "center", content: "Unhedged Market" },
+      JSON.stringify({
+        okxUSDT: round_dp(okxBalanceUSDT, 2),
+        aarkUSDC: round_dp(aarkBalanceUSDC, 2),
       })
     );
-    console.log(
-      table(marketSummary, {
-        header: { alignment: "center", content: "Market Summary" },
-      })
-    );
-  }
-
-  logActionParams(cexActionParams);
-  logActionParams(aarkActionParams);
-
-  await Promise.all([
-    cexService.executeOrders(cexActionParams),
-    aarkService.executeOrders(aarkActionParams),
-  ]);
-  console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
-  if (!hedged) {
-    await monitorService.slackMessage(
-      `ARBITRAGEUR UNHEDGED`,
-      `Unhedged for ${LOCAL_STATE.unhedgedCnt} iteration`,
-      true,
-      true
-    );
-  } else {
-    await logOrderInfoToSlack(cexActionParams, aarkActionParams, arbSnapshot);
-  }
-}
-
-async function checkBalance(
-  cexBalance: Balance[],
-  aarkBalance: Balance[],
-  usdcPrice: number
-) {
-  const cexBalanceUSDT = cexBalance
-    .filter((balance) => balance.currency === "USDT")
-    .reduce((acc, balance) => acc + balance.total, 0);
-  const aarkBalanceUSDC = aarkBalance
-    .filter((balance) => balance.currency === "USDC")
-    .reduce((acc, balance) => acc + balance.total, 0);
-  console.log(
-    JSON.stringify({
-      okxUSDT: round_dp(cexBalanceUSDT, 2),
-      aarkUSDC: round_dp(aarkBalanceUSDC, 2),
-    })
-  );
-  if (
-    Math.abs(cexBalanceUSDT - INITIAL_BALANCE_USDT * BALANCE_RATIO_IN_OKX) >
-    INITIAL_BALANCE_USDT * BALANCE_RATIO_DIFF_THRESHOLD
-  ) {
-    await monitorService.slackMessage(
-      "OKX BALANCE OUT OF RANGE",
-      `okx balance USDT : ${formatNumber(
-        cexBalanceUSDT,
-        2
-      )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
-      true,
-      true,
-      false
-    );
-  }
-
-  if (
-    Math.abs(
-      aarkBalanceUSDC - INITIAL_BALANCE_USDT * BALANCE_RATIO_IN_AARK * usdcPrice
-    ) >
-    INITIAL_BALANCE_USDT * BALANCE_RATIO_DIFF_THRESHOLD * usdcPrice
-  ) {
-    await monitorService.slackMessage(
-      "AARK BALANCE OUT OF RANGE",
-      `okx balance USDT : ${formatNumber(
-        cexBalanceUSDT,
-        2
-      )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
-      true,
-      true,
-      false
-    );
-  }
-}
-
-function updatePremiumEMA(
-  crypto: string,
-  cexOrderbook: Orderbook,
-  aarkMarketStatus: IAarkMarketStatus,
-  aarkIndexPrice: number,
-  usdcPrice: number
-) {
-  const premiumEMA = LOCAL_STATE["premiumEMA"][crypto];
-
-  const premium =
-    ((aarkIndexPrice *
-      usdcPrice *
-      (1 + aarkMarketStatus.skewness / aarkMarketStatus.depthFactor / 100)) /
-      (cexOrderbook.asks[0][0] + cexOrderbook.bids[0][0])) *
-      2 -
-    1;
-  LOCAL_STATE["premiumEMA"][crypto] =
-    premiumEMA === undefined
-      ? premium
-      : premiumEMA * (1 - 1 / EMA_WINDOW) + premium / EMA_WINDOW;
-}
-
-function getHedgeActionParam(
-  crypto: string,
-  unhedgedDetected: string[][],
-  cexMarket: IMarket,
-  aarkMarket: IAarkMarket
-) {
-  const cexPosition = cexMarket.position!;
-  const aarkPosition = aarkMarket.position!;
-  const midPrice =
-    (cexMarket.orderbook!.asks[0][0] + cexMarket.orderbook!.bids[0][0]) / 2;
-  const hedgeActionParams: IActionParam[] = [];
-  const unhedgedSize = cexPosition.size + aarkPosition.size;
-  if (Math.abs(unhedgedSize) * midPrice > UNHEDGED_THRESHOLD_USDT) {
-    const absSizeToHedge = Math.min(
-      Math.abs(unhedgedSize),
-      MAX_ORDER_USDT / midPrice
-    );
-    addCreateMarketParams(hedgeActionParams, [
-      {
-        symbol: `${crypto}_USDC`,
-        size: applyQtyPrecision(
-          unhedgedSize < 0 ? absSizeToHedge : -absSizeToHedge,
-          [aarkMarket.marketInfo]
-        ),
-      },
-    ]);
-    unhedgedDetected.push([
-      crypto,
-      cexPosition.size.toPrecision(4),
-      aarkPosition.size.toPrecision(4),
-      (Math.abs(unhedgedSize) * midPrice).toPrecision(4),
-    ]);
-  }
-  return hedgeActionParams;
-}
-
-function getArbAmountInAark(
-  crypto: string,
-  cexMarket: IMarket,
-  aarkMarket: IAarkMarket,
-  usdcPrice: number
-): [number, any] {
-  const cexOrderbook = cexMarket.orderbook!;
-  const cexMidUSDT = (cexOrderbook.bids[0][0] + cexOrderbook.asks[0][0]) / 2;
-  const cexMarketInfo = cexMarket.marketInfo!;
-  const cexFundingRate = cexMarket.fundingRate!;
-  const cexPosition = cexMarket.position!;
-  const aarkStatus = aarkMarket.marketStatus!;
-  const aarkIndexPrice = aarkMarket.indexPrice!;
-  const aarkPosition = aarkMarket.position!;
-  const aarkFundingRate = aarkStatus.fundingRatePrice24h / aarkIndexPrice;
-
-  const enterLongThreshold = calcEnterThreshold(
-    cexFundingRate,
-    aarkFundingRate,
-    LOCAL_STATE["premiumEMA"][crypto],
-    true
-  );
-  const enterShortThreshold = calcEnterThreshold(
-    cexFundingRate,
-    aarkFundingRate,
-    LOCAL_STATE["premiumEMA"][crypto],
-    false
-  );
-
-  const thresholdInfo = {
-    enterLong: round_dp(enterLongThreshold, 8),
-    enterShort: round_dp(enterShortThreshold, 8),
-  };
-
-  let orderSizeInAark;
-  // ENTER AARK LONG
-  orderSizeInAark = _getArbBuyAmountInAark(
-    cexOrderbook,
-    cexMarketInfo,
-    aarkStatus,
-    aarkIndexPrice,
-    enterLongThreshold,
-    usdcPrice
-  );
-  if (orderSizeInAark > 0) {
-    // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
-    return [
-      _limitBuyOrderSize(
-        orderSizeInAark,
-        cexMidUSDT,
-        aarkPosition.size,
-        aarkStatus.skewness,
+    if (
+      Math.abs(
+        okxBalanceUSDT -
+          this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_OKX
+      ) >
+      this.params.INITIAL_BALANCE_USDT *
+        this.params.BALANCE_RATIO_DIFF_THRESHOLD
+    ) {
+      this.monitorService.slackMessage(
+        "OKX BALANCE OUT OF RANGE",
+        `okx balance USDT : ${formatNumber(
+          okxBalanceUSDT,
+          2
+        )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
+        true,
+        true,
         false
-      ),
-      thresholdInfo,
-    ];
-  }
-
-  // ENTER AARK SHORT
-  orderSizeInAark = _getArbSellAmountInAark(
-    cexOrderbook,
-    cexMarketInfo,
-    aarkStatus,
-    aarkIndexPrice,
-    enterShortThreshold,
-    usdcPrice
-  );
-  if (orderSizeInAark < 0) {
-    // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
-    return [
-      _limitSellOrderSize(
-        orderSizeInAark,
-        cexMidUSDT,
-        aarkPosition.size,
-        aarkStatus.skewness,
-        false
-      ),
-      thresholdInfo,
-    ];
-  }
-
-  return [0, thresholdInfo];
-}
-
-function calcEnterThreshold(
-  cexFundingRate: FundingRate,
-  aarkFundingRate24h: number,
-  ema: number,
-  isLong: boolean // true = ENTER AARK LONG, false = ENTER AARK SHORT
-): number {
-  const ts = Date.now();
-  const sign = isLong ? 1 : -1;
-  const cexFundingAdjTerm =
-    -sign *
-    cexFundingRate.fundingRate *
-    ((EIGHT_HOUR_IN_MS + ts - cexFundingRate.fundingTime) / EIGHT_HOUR_IN_MS) **
-      2;
-  const aarkFundingAdjTerm =
-    sign * AARK_FUNDING_MULTIPLIER * aarkFundingRate24h;
-  return (
-    -sign * ema +
-    Math.max(
-      BASE_PRICE_DIFF_THRESHOLD + cexFundingAdjTerm + aarkFundingAdjTerm,
-      MIN_PRICE_DIFF_THRESHOLD
-    )
-  );
-}
-
-function _getArbBuyAmountInAark(
-  cexOrderbook: Orderbook,
-  cexMarketInfo: IMarketInfo,
-  aarkMarketStatus: IAarkMarketStatus,
-  aarkIndexPrice: number,
-  threshold: number,
-  usdcPrice: number
-): number {
-  const depthFactor = Number(aarkMarketStatus.depthFactor);
-  const skewness = Number(aarkMarketStatus.skewness);
-
-  // Aark Buy
-  let orderSizeInAark = 0;
-  for (const [p, q] of cexOrderbook.bids) {
-    const deltaAmount = Math.min(
-      q * cexMarketInfo.contractSize,
-      2 *
-        (100 *
-          depthFactor *
-          (((p / usdcPrice) * (1 - threshold)) / aarkIndexPrice - 1) -
-          skewness) -
-        orderSizeInAark
-    );
-    if (deltaAmount < 0) {
-      break;
-    }
-    orderSizeInAark += deltaAmount;
-    if (deltaAmount !== q) {
-      break;
-    }
-  }
-  return orderSizeInAark;
-}
-
-function _getArbSellAmountInAark(
-  cexOrderbook: Orderbook,
-  cexMarketInfo: IMarketInfo,
-  aarkMarketStatus: IAarkMarketStatus,
-  aarkIndexPrice: number,
-  threshold: number,
-  usdcPrice: number
-): number {
-  const depthFactor = Number(aarkMarketStatus.depthFactor);
-  const skewness = Number(aarkMarketStatus.skewness);
-
-  let orderSizeInAark = 0;
-  for (const [p, q] of cexOrderbook.asks) {
-    const deltaAmount = Math.min(
-      q * cexMarketInfo.contractSize,
-      2 *
-        (-100 *
-          depthFactor *
-          (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) +
-          skewness) +
-        orderSizeInAark
-    );
-    if (deltaAmount < 0) {
-      break;
-    }
-    orderSizeInAark -= deltaAmount;
-    if (deltaAmount !== q) {
-      break;
+      );
     }
   }
 
-  return orderSizeInAark;
-}
-
-function _limitBuyOrderSize(
-  orderSizeInAark: number,
-  cexMidUSDT: number,
-  aarkPositionSize: number,
-  skewness: number,
-  isExit: boolean
-): number {
-  return Math.min(
-    orderSizeInAark,
-    MAX_ORDER_USDT / cexMidUSDT,
-    MAX_POSITION_USDT / cexMidUSDT - aarkPositionSize,
-    isExit
-      ? -aarkPositionSize
-      : Math.max(
-          -(skewness + aarkPositionSize) / 2,
-          -skewness - MAX_MARKET_SKEWNESS_USDT / cexMidUSDT,
-          0
-        )
-  );
-}
-
-function _limitSellOrderSize(
-  orderSizeInAark: number,
-  cexMidUSDT: number,
-  aarkPositionSize: number,
-  skewness: number,
-  isExit: boolean
-): number {
-  return Math.max(
-    orderSizeInAark,
-    -MAX_ORDER_USDT / cexMidUSDT,
-    -MAX_POSITION_USDT / cexMidUSDT - aarkPositionSize,
-    isExit
-      ? -aarkPositionSize
-      : Math.min(
-          -(skewness + aarkPositionSize) / 2,
-          -skewness + MAX_MARKET_SKEWNESS_USDT / cexMidUSDT,
-          0
-        )
-  );
-}
-
-function getMarketSummary(
-  crypto: string,
-  cexMarket: IMarket,
-  aarkMarket: IAarkMarket,
-  usdcPrice: number,
-  sizeInAark: number
-): string[] {
-  const cexMidUSDT =
-    (cexMarket.orderbook!.bids[0][0] + cexMarket.orderbook!.asks[0][0]) / 2;
-  const exchangePremium =
-    (aarkMarket.indexPrice! / (cexMidUSDT / usdcPrice) - 1) * 100;
-  const skewnessPremium =
-    aarkMarket.marketStatus!.skewness / aarkMarket.marketStatus!.depthFactor;
-  const skewnessUSDTValue =
-    aarkMarket.marketStatus!.skewness * aarkMarket.indexPrice!;
-  const fundingRate24h =
-    (aarkMarket.marketStatus!.fundingRatePrice24h / aarkMarket.indexPrice!) *
-    100;
-  const enterValue = sizeInAark * cexMidUSDT;
-  return [
-    crypto,
-    formatNumber(exchangePremium, 4),
-    formatNumber(skewnessPremium, 4),
-    formatNumber(skewnessUSDTValue, 4),
-    formatNumber(fundingRate24h, 4),
-    formatNumber(enterValue, 4),
-  ];
-}
-
-function hadOrderRecently(
-  crypto: string,
-  timestamp: number,
-  interval: number = MIN_ORDER_INTERVAL_MS
-) {
-  if (
-    LOCAL_STATE.lastOrderTimestamp[crypto] !== undefined &&
-    LOCAL_STATE.lastOrderTimestamp[crypto] > timestamp - interval
+  _updatePremiumEMA(
+    crypto: string,
+    okxMarket: IMarket,
+    aarkMarket: IAarkMarket,
+    usdcPrice: number
   ) {
-    console.log(crypto, LOCAL_STATE.lastOrderTimestamp[crypto], timestamp);
-    return true;
-  } else {
-    return false;
-  }
-}
+    const premiumEMA = this.localState.premiumEMA[crypto];
+    const okxMidUSDT =
+      (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
+    const premium =
+      (aarkMarket.indexPrice! *
+        usdcPrice *
+        (1 +
+          aarkMarket.marketStatus!.skewness /
+            aarkMarket.marketStatus!.depthFactor /
+            100)) /
+        okxMidUSDT -
+      1;
+    if (premiumEMA === undefined) {
+      this.localState.premiumEMA[crypto] = {
+        value: premium,
+        weight: 1,
+      };
+    } else {
+      const emaWeight = Math.min(
+        this.params.MARKET_PARAMS[crypto].EMA_WINDOW - 1,
+        premiumEMA.weight
+      );
 
-async function logOrderInfoToSlack(
-  cexActionParams: IActionParam[],
-  aarkActionParams: IActionParam[],
-  arbSnapshot: IArbSnapshot[]
-) {
-  if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
-    const cryptoList = Array.from(
-      new Set(
-        cexActionParams
-          .concat(aarkActionParams)
-          .map((ap) => ap.symbol.split("_")[0])
+      this.localState.premiumEMA[crypto] = {
+        value: (premiumEMA.value * emaWeight + premium) / (emaWeight + 1),
+        weight: emaWeight + 1,
+      };
+    }
+  }
+
+  _getHedgeActionParam(
+    crypto: string,
+    okxMarket: IMarket,
+    aarkMarket: IAarkMarket
+  ) {
+    const marketParam = this.params.MARKET_PARAMS[crypto];
+    const okxPosition = okxMarket.position!;
+    const aarkPosition = aarkMarket.position!;
+    const midPrice =
+      (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
+    const hedgeActionParams: IActionParam[] = [];
+    const unhedgedSize = okxPosition.size + aarkPosition.size;
+    if (
+      Math.abs(unhedgedSize) * midPrice >
+      marketParam.UNHEDGED_THRESHOLD_USDT
+    ) {
+      const absSizeToHedge = Math.min(
+        Math.abs(unhedgedSize),
+        marketParam.MAX_ORDER_USDT / midPrice
+      );
+      addCreateMarketParams(hedgeActionParams, [
+        {
+          symbol: `${crypto}_USDC`,
+          size: applyQtyPrecision(
+            unhedgedSize < 0 ? absSizeToHedge : -absSizeToHedge,
+            [aarkMarket.marketInfo]
+          ),
+        },
+      ]);
+    }
+    return hedgeActionParams;
+  }
+
+  _updateLastOrderTimestamp(crypto: string, timestamp: number) {
+    this.localState.lastOrderTimestamp[crypto] = timestamp;
+  }
+
+  _hadOrderRecently(crypto: string, timestamp: number, interval: number) {
+    if (
+      this.localState.lastOrderTimestamp[crypto] !== undefined &&
+      this.localState.lastOrderTimestamp[crypto] > timestamp - interval
+    ) {
+      console.log(
+        crypto,
+        this.localState.lastOrderTimestamp[crypto],
+        timestamp
+      );
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  _calcEnterThreshold(
+    crypto: string,
+    okxFundingRate: FundingRate,
+    aarkFundingRate24h: number,
+    ema: number,
+    isLong: boolean // true = ENTER AARK LONG, false = ENTER AARK SHORT
+  ): number {
+    const marketParam = this.params.MARKET_PARAMS[crypto];
+    const ts = Date.now();
+    const sign = isLong ? 1 : -1;
+    const okxFundingAdjTerm =
+      -sign *
+      okxFundingRate.fundingRate *
+      ((EIGHT_HOUR_IN_MS + ts - okxFundingRate.fundingTime) /
+        EIGHT_HOUR_IN_MS) **
+        2;
+    const aarkFundingAdjTerm =
+      sign * marketParam.AARK_FUNDING_MULTIPLIER * aarkFundingRate24h;
+    return (
+      -sign * ema +
+      Math.max(
+        marketParam.BASE_PRICE_DIFF_THRESHOLD +
+          okxFundingAdjTerm +
+          aarkFundingAdjTerm,
+        marketParam.MIN_PRICE_DIFF_THRESHOLD
       )
-    ).join(",");
-    await monitorService.slackMessage(
-      `Arbitrage Detected : ${cryptoList}`,
-      `\n*CEX ORDER*\n${JSON.stringify(
-        cexActionParams
-      )}\n*AARK ORDER*\n${JSON.stringify(
-        aarkActionParams
-      )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
-      true,
-      false,
-      true
     );
   }
-}
 
-function updateLastOrderTimestamp(crypto: string, timestamp: number) {
-  LOCAL_STATE.lastOrderTimestamp[crypto] = timestamp;
+  _getArbBuyAmountInAark(
+    okxOrderbook: Orderbook,
+    okxMarketInfo: IMarketInfo,
+    aarkMarketStatus: IAarkMarketStatus,
+    aarkIndexPrice: number,
+    threshold: number,
+    usdcPrice: number
+  ): number {
+    const depthFactor = Number(aarkMarketStatus.depthFactor);
+    const skewness = Number(aarkMarketStatus.skewness);
+
+    // Aark Buy
+    let orderSizeInAark = 0;
+    for (const [p, q] of okxOrderbook.bids) {
+      const deltaAmount = Math.min(
+        q * okxMarketInfo.contractSize,
+        2 *
+          (100 *
+            depthFactor *
+            (((p / usdcPrice) * (1 - threshold)) / aarkIndexPrice - 1) -
+            skewness) -
+          orderSizeInAark
+      );
+      if (deltaAmount < 0) {
+        break;
+      }
+      orderSizeInAark += deltaAmount;
+      if (deltaAmount !== q) {
+        break;
+      }
+    }
+    return orderSizeInAark;
+  }
+
+  _getArbSellAmountInAark(
+    okxOrderbook: Orderbook,
+    okxMarketInfo: IMarketInfo,
+    aarkMarketStatus: IAarkMarketStatus,
+    aarkIndexPrice: number,
+    threshold: number,
+    usdcPrice: number
+  ): number {
+    const depthFactor = Number(aarkMarketStatus.depthFactor);
+    const skewness = Number(aarkMarketStatus.skewness);
+
+    let orderSizeInAark = 0;
+    for (const [p, q] of okxOrderbook.asks) {
+      const deltaAmount = Math.min(
+        q * okxMarketInfo.contractSize,
+        2 *
+          (-100 *
+            depthFactor *
+            (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) +
+            skewness) +
+          orderSizeInAark
+      );
+      if (deltaAmount < 0) {
+        break;
+      }
+      orderSizeInAark -= deltaAmount;
+      if (deltaAmount !== q) {
+        break;
+      }
+    }
+
+    return orderSizeInAark;
+  }
+
+  _limitBuyOrderSize(
+    crypto: string,
+    orderSizeInAark: number,
+    okxMidUSDT: number,
+    aarkPositionSize: number,
+    skewness: number,
+    isExit: boolean
+  ): number {
+    const marketParam = this.params.MARKET_PARAMS[crypto];
+    return Math.min(
+      orderSizeInAark,
+      marketParam.MAX_ORDER_USDT / okxMidUSDT,
+      marketParam.MAX_POSITION_USDT / okxMidUSDT - aarkPositionSize,
+      isExit
+        ? -aarkPositionSize
+        : Math.max(
+            -(skewness + aarkPositionSize) / 2,
+            -skewness - marketParam.MAX_MARKET_SKEWNESS_USDT / okxMidUSDT,
+            0
+          )
+    );
+  }
+
+  _limitSellOrderSize(
+    crypto: string,
+    orderSizeInAark: number,
+    okxMidUSDT: number,
+    aarkPositionSize: number,
+    skewness: number,
+    isExit: boolean
+  ): number {
+    const marketParam = this.params.MARKET_PARAMS[crypto];
+    return Math.max(
+      orderSizeInAark,
+      -marketParam.MAX_ORDER_USDT / okxMidUSDT,
+      -marketParam.MAX_POSITION_USDT / okxMidUSDT - aarkPositionSize,
+      isExit
+        ? -aarkPositionSize
+        : Math.min(
+            -(skewness + aarkPositionSize) / 2,
+            -skewness + marketParam.MAX_MARKET_SKEWNESS_USDT / okxMidUSDT,
+            0
+          )
+    );
+  }
+
+  _getArbAmountInAark(
+    crypto: string,
+    okxMarket: IMarket,
+    aarkMarket: IAarkMarket,
+    usdcPrice: number
+  ): [number, { enterLong: number; enterShort: number }] {
+    const okxOrderbook = okxMarket.orderbook!;
+    const okxMidUSDT = (okxOrderbook.bids[0][0] + okxOrderbook.asks[0][0]) / 2;
+    const okxMarketInfo = okxMarket.marketInfo!;
+    const okxFundingRate = okxMarket.fundingRate!;
+    const okxPosition = okxMarket.position!;
+    const aarkStatus = aarkMarket.marketStatus!;
+    const aarkIndexPrice = aarkMarket.indexPrice!;
+    const aarkPosition = aarkMarket.position!;
+    const aarkFundingRate = aarkStatus.fundingRatePrice24h / aarkIndexPrice;
+    const premiumEMA = this.localState.premiumEMA[crypto].value;
+
+    const enterLongThreshold = this._calcEnterThreshold(
+      crypto,
+      okxFundingRate,
+      aarkFundingRate,
+      premiumEMA,
+      true
+    );
+    const enterShortThreshold = this._calcEnterThreshold(
+      crypto,
+      okxFundingRate,
+      aarkFundingRate,
+      premiumEMA,
+      false
+    );
+
+    const thresholdInfo = {
+      enterLong: round_dp(enterLongThreshold, 8),
+      enterShort: round_dp(enterShortThreshold, 8),
+    };
+
+    let orderSizeInAark;
+    // ENTER AARK LONG
+    orderSizeInAark = this._getArbBuyAmountInAark(
+      okxOrderbook,
+      okxMarket.marketInfo,
+      aarkStatus,
+      aarkIndexPrice,
+      enterLongThreshold,
+      usdcPrice
+    );
+    if (orderSizeInAark > 0) {
+      // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
+      return [
+        this._limitBuyOrderSize(
+          crypto,
+          orderSizeInAark,
+          okxMidUSDT,
+          aarkPosition.size,
+          aarkStatus.skewness,
+          false
+        ),
+        thresholdInfo,
+      ];
+    }
+
+    // ENTER AARK SHORT
+    orderSizeInAark = this._getArbSellAmountInAark(
+      okxOrderbook,
+      okxMarket.marketInfo,
+      aarkStatus,
+      aarkIndexPrice,
+      enterShortThreshold,
+      usdcPrice
+    );
+    if (orderSizeInAark < 0) {
+      // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
+      return [
+        this._limitSellOrderSize(
+          crypto,
+          orderSizeInAark,
+          okxMidUSDT,
+          aarkPosition.size,
+          aarkStatus.skewness,
+          false
+        ),
+        thresholdInfo,
+      ];
+    }
+
+    return [0, thresholdInfo];
+  }
+
+  _logActionParams(actionParams: IActionParam[]) {
+    console.log(
+      JSON.stringify(actionParams.map((ap: IActionParam) => ap.order))
+    );
+  }
+
+  _logOrderInfoToSlack(
+    cexActionParams: IActionParam[],
+    aarkActionParams: IActionParam[],
+    arbSnapshot: any[]
+  ) {
+    if (cexActionParams.length !== 0 || aarkActionParams.length !== 0) {
+      const cryptoList = Array.from(
+        new Set(
+          cexActionParams
+            .concat(aarkActionParams)
+            .map((ap) => ap.symbol.split("_")[0])
+        )
+      ).join(",");
+      this.monitorService.slackMessage(
+        `Arbitrage Detected : ${cryptoList}`,
+        `\n*CEX ORDER*\n${JSON.stringify(
+          cexActionParams
+        )}\n*AARK ORDER*\n${JSON.stringify(
+          aarkActionParams
+        )}\n*Snpashot*\n${JSON.stringify(arbSnapshot)}`,
+        true,
+        false,
+        true
+      );
+    }
+  }
 }

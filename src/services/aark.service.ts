@@ -30,6 +30,7 @@ const symbolIdMap: { [symbol: string]: number } = {
   SOL: 7,
   USDT: 8,
   DOGE: 9,
+  LINK: 10,
   ADA: 12,
   ATOM: 13,
   LTC: 14,
@@ -236,14 +237,6 @@ export class OctService {
   private readonly PRICE_DECIMALS = 8;
   private readonly QTY_DECIMALS = 10;
   private _wallet: ethers.Wallet;
-  private monitorService: MonitorService;
-  private delegateePkInfo: {
-    epoch: number;
-    pk: string;
-  } = {
-    epoch: -1,
-    pk: "",
-  };
 
   constructor(signer_pk: string) {
     this._wallet = new ethers.Wallet(
@@ -253,7 +246,6 @@ export class OctService {
         process.env.ALCHEMY_API_KEY!
       )
     );
-    this.monitorService = MonitorService.getInstance();
   }
 
   async init() {
@@ -266,23 +258,6 @@ export class OctService {
       OctRouterABI,
       this._wallet
     );
-
-    const seedInfo = this._getSeed(this._getEpoch());
-
-    const registeredDelegatee = await octRouter.delegatees(
-      seedInfo.epoch,
-      this._wallet.address
-    );
-    const signature = await this._wallet.signMessage(seedInfo.seed);
-    const delegateePk = `${ethers.utils.keccak256(signature)}`;
-    const delegateeWallet = new ethers.Wallet(delegateePk, provider);
-
-    if (registeredDelegatee !== delegateeWallet.address) {
-      await this.tryDelegate();
-    } else {
-      this.delegateePkInfo.epoch = seedInfo.epoch;
-      this.delegateePkInfo.pk = delegateePk;
-    }
   }
 
   async octOrder(
@@ -294,8 +269,6 @@ export class OctService {
     slippageTolerance: number = 0,
     isReduceOnly_: boolean = false
   ) {
-    await this.tryDelegate();
-    const delegateeWallet = new ethers.Wallet(this.delegateePkInfo.pk);
     const nonce = Date.now();
 
     const orderObject = this._getFuturesOrderObject(
@@ -323,13 +296,13 @@ export class OctService {
     );
     const msgHashBinary = ethers.utils.arrayify(hashMsg);
 
-    const signature = await delegateeWallet.signMessage(msgHashBinary);
+    const signature = await this._wallet.signMessage(msgHashBinary);
 
     const res = await axios.post(
       `${process.env.OCT_BACKEND_URL}/oct/order`,
       {
         delegator: this._wallet.address,
-        delegatee: delegateeWallet.address,
+        delegatee: this._wallet.address,
         order: orderObject,
         nonce: nonce,
       },
@@ -339,62 +312,6 @@ export class OctService {
         },
       }
     );
-  }
-
-  async tryDelegate() {
-    const epoch = this._getEpoch();
-    if (this.delegateePkInfo.epoch === epoch) {
-      return;
-    }
-    const seedInfo = this._getSeed(epoch);
-    const signaturePK = await this._wallet.signMessage(seedInfo.seed);
-    this.delegateePkInfo.epoch = seedInfo.epoch;
-    this.delegateePkInfo.pk = `${ethers.utils.keccak256(signaturePK)}`;
-
-    const delegateeWallet = new ethers.Wallet(this.delegateePkInfo.pk);
-    const nonce = Date.now();
-
-    const hashMsg = ethers.utils.keccak256(
-      new ethers.utils.AbiCoder().encode(
-        ["address", "address", "uint256"],
-        [this._wallet.address, delegateeWallet.address, nonce]
-      )
-    );
-    const msgHashBinary = ethers.utils.arrayify(hashMsg);
-
-    const signature = await this._wallet.signMessage(msgHashBinary);
-    console.log(`--- Deleagation Ocurred---`);
-    await this.monitorService.slackMessage(
-      "Delegation Occurred",
-      "",
-      true,
-      true
-    );
-    await axios.post(
-      `${process.env.OCT_BACKEND_URL}/oct/delegate`,
-      {
-        delegator: this._wallet.address,
-        delegatee: delegateeWallet.address,
-        nonce: nonce,
-      },
-      {
-        headers: {
-          signature: signature,
-        },
-      }
-    );
-  }
-
-  private _getEpoch() {
-    return Math.floor(Number((Date.now() / 1000).toFixed()) / (3 * 24 * 3600));
-  }
-
-  private _getSeed(epoch: number) {
-    const random = new Prando(epoch);
-    return {
-      epoch: epoch,
-      seed: random.nextString(8, "abcdef0123456789"),
-    };
   }
 
   private _getFuturesOrderObject(
