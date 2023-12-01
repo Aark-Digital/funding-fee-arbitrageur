@@ -37,16 +37,16 @@ export class MonitorService {
   async slackMessage(
     topic: string,
     desc: string,
+    interval: number = 60_000,
     tagManager: boolean = false,
-    call: boolean = false,
-    ignoreInterval: boolean = false
+    call: boolean = false
   ) {
     if (this.slackParam === undefined) {
       console.log(`UNDEINFED SLACK PARAM`);
       return;
     }
     const timestamp = new Date().getTime();
-    if (!ignoreInterval && this._isSlackSentRecently(topic, timestamp)) {
+    if (this._isSlackSentRecently(topic, timestamp, interval)) {
       return;
     }
     const text =
@@ -64,11 +64,14 @@ export class MonitorService {
     this.slackMessageTimestamp[topic] = timestamp;
   }
 
-  private _isSlackSentRecently(topic: string, timestamp: number): boolean {
+  private _isSlackSentRecently(
+    topic: string,
+    timestamp: number,
+    interval: number
+  ): boolean {
     return (
       this.slackMessageTimestamp[topic] !== undefined &&
-      this.slackMessageTimestamp[topic] >
-        timestamp - this.slackParam!.messageInterval
+      this.slackMessageTimestamp[topic] > timestamp - interval
     );
   }
 

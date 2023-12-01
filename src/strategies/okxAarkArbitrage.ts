@@ -99,7 +99,7 @@ export class Strategy {
         this.monitorService.slackMessage(
           "Data Validation Fail",
           "",
-          false,
+          60_000,
           false,
           false
         );
@@ -348,9 +348,9 @@ export class Strategy {
           okxBalanceUSDT,
           2
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
+        60_000,
         true,
-        true,
-        false
+        true
       );
     }
   }
