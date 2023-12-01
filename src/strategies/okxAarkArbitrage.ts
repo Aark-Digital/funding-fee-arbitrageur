@@ -143,7 +143,7 @@ export class Strategy {
       ]);
       if (
         Math.abs(orderSizeInAark) * okxMidUSDT <
-        marketParams.MIN_ORDER_USDT
+        marketParams[crypto].MIN_ORDER_USDT
       ) {
         orderSizeInAark = 0;
       }
