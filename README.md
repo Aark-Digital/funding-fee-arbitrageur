@@ -68,7 +68,7 @@ AARK_INDEX_PRICE_URL=https://xxxxxxx
 
 # marketConfig.ts
 
-To generate MARKET_PARAMS, Run below script and then Copy & Paste string 'market config string section' to .env
+To generate MARKET_PARAMS, Run below script and then Copy & Paste string 'MARKET_PARAMS string'section to .env
 
 ```
 import { checkObjectKeys } from "src/utils/env";
