@@ -189,14 +189,24 @@ export class Strategy {
     this._logActionParams(okxActionParams);
     this._logActionParams(aarkActionParams);
 
-    await Promise.all([
-      this.okxService.executeOrders(okxActionParams),
-      this.aarkService.executeOrders(aarkActionParams),
-    ]);
+    try {
+      await Promise.all([
+        this.okxService.executeOrders(okxActionParams),
+        this.aarkService.executeOrders(aarkActionParams),
+      ]);
+    } catch (e) {
+      this.monitorService.slackMessage(
+        `EXECUTION ERROR`,
+        `Failed to execute order : ${e}`,
+        0,
+        true,
+        true
+      );
+    }
 
     console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
     if (!hedged) {
-      await this.monitorService.slackMessage(
+      this.monitorService.slackMessage(
         `ARBITRAGEUR UNHEDGED`,
         `Unhedged for ${this.localState.unhedgedCnt} iteration`,
         60_000,
