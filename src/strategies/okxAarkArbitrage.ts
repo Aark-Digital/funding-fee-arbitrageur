@@ -49,6 +49,7 @@ export class Strategy {
   }
 
   async init() {
+    this.monitorService.slackMessage("ARBITRAGEUR START", "", 0, true, false);
     await this.okxService.init();
     await this.aarkService.init();
   }
