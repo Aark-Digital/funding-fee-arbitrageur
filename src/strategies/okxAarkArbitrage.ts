@@ -49,7 +49,13 @@ export class Strategy {
   }
 
   async init() {
-    this.monitorService.slackMessage("ARBITRAGEUR START", "", 0, true, false);
+    this.monitorService.slackMessage(
+      "ARBITRAGEUR START",
+      `${JSON.stringify(this.params.MARKET_PARAMS, null, 2)}`,
+      0,
+      true,
+      false
+    );
     await this.okxService.init();
     await this.aarkService.init();
   }
