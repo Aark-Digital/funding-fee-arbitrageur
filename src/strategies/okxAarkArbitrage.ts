@@ -1,3 +1,4 @@
+import cron from "node-cron";
 import { checkObjectKeys } from "../utils/env";
 import {
   FundingRate,
@@ -58,6 +59,9 @@ export class Strategy {
     );
     await this.okxService.init();
     await this.aarkService.init();
+    cron.schedule("0 * * * *", () => {
+      this._logBalanceToSlack();
+    });
   }
 
   async run() {
@@ -269,6 +273,19 @@ export class Strategy {
       DATA_FETCH_TIME_THRESHOLD_MS,
       MARKET_PARAMS,
     };
+  }
+
+  _logBalanceToSlack() {
+    this.monitorService.slackMessage(
+      "BALANCE INFO",
+      JSON.stringify({
+        aark: this.aarkService.getBalance(),
+        okx: this.okxService.getBalance(),
+      }),
+      3_600_000,
+      false,
+      false
+    );
   }
 
   async _fetchData(): Promise<boolean> {
