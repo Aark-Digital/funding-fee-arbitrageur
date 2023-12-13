@@ -282,7 +282,7 @@ export class Strategy {
         aark: this.aarkService.getBalance(),
         okx: this.okxService.getBalance(),
       }),
-      3_600_000,
+      60_000,
       false,
       false
     );
