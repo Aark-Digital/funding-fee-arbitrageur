@@ -230,6 +230,16 @@
               "type": "uint8"
             },
             {
+              "internalType": "uint256",
+              "name": "fundingRateCoefficient",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "targetLeverage",
+              "type": "uint256"
+            },
+            {
               "internalType": "uint32",
               "name": "imr",
               "type": "uint32"
@@ -293,6 +303,16 @@
               "internalType": "enum DataTypes.MarketStatus",
               "name": "status",
               "type": "uint8"
+            },
+            {
+              "internalType": "uint256",
+              "name": "fundingRateCoefficient",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "targetLeverage",
+              "type": "uint256"
             },
             {
               "internalType": "uint32",

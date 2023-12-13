@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 import BigNumber from "bignumber.js";
 import { abi as ContractReader } from "../abis/ContractReader.json";
 import { abi as OctRouterABI } from "../abis/OctRouter.json";
-import { abi as FuturesManager } from "../abis/FuturesManager.json";
+import { abi as LpManager } from "../abis/LpManager.json";
 import { contractAddressMap } from "../constants/contract-address";
 import { IAarkMarket } from "../interfaces/market-interface";
 import {
@@ -56,9 +56,11 @@ const collateralAddressMap: { [symbol: string]: string } = {
 export class AarkService {
   private octService: OctService;
   private contractReader: ethers.Contract;
+  private lpManager: ethers.Contract;
   private symbolList: string[];
   private markets: { [symbol: string]: IAarkMarket } = {};
   private balances: undefined | Balance[];
+  private lpPoolValue: undefined | number;
   private signer: ethers.Wallet;
   private provider: ethers.providers.AlchemyProvider =
     new ethers.providers.AlchemyProvider(
@@ -73,6 +75,11 @@ export class AarkService {
     this.contractReader = new ethers.Contract(
       contractAddressMap["contractReader"],
       ContractReader,
+      this.signer
+    );
+    this.lpManager = new ethers.Contract(
+      contractAddressMap["lpManager"],
+      LpManager,
       this.signer
     );
     this.symbolList.forEach((symbol) => {
@@ -105,6 +112,10 @@ export class AarkService {
 
   getBalance() {
     return this.balances;
+  }
+
+  getLpPoolValue() {
+    return this.lpPoolValue;
   }
 
   async fetchOrderbooks() {
@@ -147,6 +158,8 @@ export class AarkService {
           depthFactor: parseEthersBignumber(rawData.depthFactor, 10),
           oiHardCap: parseEthersBignumber(rawData.skewnessHardCap, 10),
           oiSoftCap: parseEthersBignumber(rawData.skewnessSoftCap, 10),
+          targetLeverage: parseEthersBignumber(rawData.targetLeverage, 2),
+          coefficient: parseEthersBignumber(rawData.fundingRateCoefficient, 2),
         };
       });
     } catch (e) {
@@ -201,6 +214,11 @@ export class AarkService {
       });
       this.balances = undefined;
     }
+  }
+
+  async fetchLpPoolValue() {
+    const lpPoolValue = await this.lpManager.getLpPoolValue();
+    this.lpPoolValue = parseEthersBignumber(lpPoolValue, 18);
   }
 
   async executeOrders(actionParams: IActionParam[]) {

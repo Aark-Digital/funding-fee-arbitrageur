@@ -25,6 +25,8 @@ export interface IAarkMarketStatus {
   oiSoftCap: number;
   oiHardCap: number;
   fundingRatePrice24h: number;
+  targetLeverage: number;
+  coefficient: number;
 }
 
 export interface IAarkMarket extends IMarket {
