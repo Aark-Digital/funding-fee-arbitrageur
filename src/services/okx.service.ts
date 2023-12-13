@@ -15,6 +15,14 @@ import {
   numberToPrecision,
 } from "../utils/number";
 import { Balance } from "src/interfaces/basic-interface";
+import { stream } from "tardis-dev";
+import AVLTree from "avl";
+import {
+  avlTreeToArray,
+  emptyAVLTree,
+  updateAVLTree,
+} from "src/utils/orderbook";
+import { MonitorService } from "./monitor.service";
 
 export class OkxSwapService {
   private baseUrl: string = "https://www.okx.com";
@@ -26,6 +34,15 @@ export class OkxSwapService {
     secret: string;
     password: string;
   };
+  private avlOrderbooks: {
+    [symbol: string]: {
+      timestamp: number;
+      seqId: number;
+      asks: AVLTree<number, number>;
+      bids: AVLTree<number, number>;
+    };
+  } = {};
+  private monitorService: MonitorService = MonitorService.getInstance();
 
   constructor(
     apiKey: string,
@@ -69,6 +86,73 @@ export class OkxSwapService {
         qtyPrecision: numberToPrecision(marketInfo.lotSz),
       };
     });
+    this.initializeOrderbookStream();
+  }
+
+  private async initializeOrderbookStream() {
+    const messages = stream({
+      exchange: "okex-swap",
+      filters: [
+        {
+          channel: "books",
+          symbols: this.symbolList.map(
+            (symbol: string) => `${this.getFormattedSymbol(symbol)}`
+          ),
+        } as any,
+      ],
+    });
+    for await (const messageResponse of messages) {
+      if (messageResponse.message.action === undefined) {
+        continue;
+      }
+      const message = messageResponse.message;
+      if (message.action === "snapshot") {
+        const asks = emptyAVLTree(true);
+        const bids = emptyAVLTree(false);
+        for (const ask of message.data[0].asks) {
+          asks.insert(Number(ask[0]), Number(ask[1]));
+        }
+        for (const bid of message.data[0].bids) {
+          bids.insert(Number(bid[0]), Number(bid[1]));
+        }
+        this.avlOrderbooks[message.arg.instId] = {
+          timestamp: new Date(message.localTimestamp).getTime(),
+          asks,
+          bids,
+          seqId: message.data[0].seqId,
+        };
+      } else if (message.action === "update") {
+        const orderbook = this.avlOrderbooks[message.arg.instId];
+        const asks = orderbook.asks;
+        const bids = orderbook.bids;
+        const data = message.data[0];
+        if (data.prevSeqId != orderbook.seqId) {
+          this.monitorService.slackMessage(
+            "OKX ORDERBOOK ERROR",
+            `(${message.arg.instId}) Sequence Skipped : ${data.prevSeqId}, ${orderbook.seqId}`,
+            10_000,
+            true,
+            true
+          );
+        }
+        updateAVLTree(
+          asks,
+          data.asks.map((quote: string[]) => [
+            Number(quote[0]),
+            Number(quote[1]),
+          ])
+        );
+        updateAVLTree(
+          bids,
+          data.bids.map((quote: string[]) => [
+            Number(quote[0]),
+            Number(quote[1]),
+          ])
+        );
+        orderbook.timestamp = Number(data.ts);
+        orderbook.seqId = data.seqId;
+      }
+    }
   }
 
   private _getSignature(
@@ -102,26 +186,15 @@ export class OkxSwapService {
 
   async fetchOrderbooks() {
     try {
-      const orderbooks: any[] = await Promise.all(
-        this.symbolList.map((symbol: string) =>
-          this._publicGet("/api/v5/market/books", {
-            instId: this.getFormattedSymbol(symbol),
-            sz: "100",
-          })
-        )
-      );
-
       this.symbolList.forEach((symbol: string, idx: number) => {
-        const ob = orderbooks[idx].data[0];
+        const asks = this.avlOrderbooks[symbol].asks;
+        const bids = this.avlOrderbooks[symbol].bids;
+        const timestamp = this.avlOrderbooks[symbol].timestamp;
         this.markets[symbol].orderbook = {
           symbol: symbol,
-          bids: ob.bids
-            .map((bid: any) => [Number(bid[0]), Number(bid[1])])
-            .sort((x: [number, number], y: [number, number]) => y[0] - x[0]),
-          asks: ob.asks
-            .map((ask: any) => [Number(ask[0]), Number(ask[1])])
-            .sort((x: [number, number], y: [number, number]) => x[0] - y[0]),
-          timestamp: Number(ob.ts),
+          bids: avlTreeToArray(bids),
+          asks: avlTreeToArray(asks),
+          timestamp: timestamp,
         };
       });
     } catch (e) {
