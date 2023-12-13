@@ -1,24 +1,24 @@
-import cron from 'node-cron';
-import { checkObjectKeys } from '../utils/env';
+import cron from "node-cron";
+import { checkObjectKeys } from "../utils/env";
 import {
   FundingRate,
   Orderbook,
   Position,
-} from '../interfaces/basic-interface';
+} from "../interfaces/basic-interface";
 import {
   IAarkMarket,
   IAarkMarketStatus,
   IMarket,
   IMarketInfo,
-} from '../interfaces/market-interface';
-import { IActionParam } from '../interfaces/order-interface';
-import { AarkService } from '../services/aark.service';
-import { MonitorService } from '../services/monitor.service';
-import { OkxSwapService } from '../services/okx.service';
-import { formatNumber, round_dp } from '../utils/number';
-import { addCreateMarketParams, applyQtyPrecision } from '../utils/order';
-import { EIGHT_HOUR_IN_MS } from '../utils/time';
-import { isValidData } from '../utils/validation';
+} from "../interfaces/market-interface";
+import { IActionParam } from "../interfaces/order-interface";
+import { AarkService } from "../services/aark.service";
+import { MonitorService } from "../services/monitor.service";
+import { OkxSwapService } from "../services/okx.service";
+import { formatNumber, round_dp } from "../utils/number";
+import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
+import { EIGHT_HOUR_IN_MS } from "../utils/time";
+import { isValidData } from "../utils/validation";
 
 export class Strategy {
   private readonly aarkService: AarkService;
@@ -45,13 +45,13 @@ export class Strategy {
       process.env.OKX_API_PASSWORD!,
       targetCryptoList
         .map((symbol: string) => `${symbol}_USDT`)
-        .concat(['USDC_USDT'])
+        .concat(["USDC_USDT"])
     );
   }
 
   async init() {
     this.monitorService.slackMessage(
-      'ARBITRAGEUR START',
+      "ARBITRAGEUR START",
       `${JSON.stringify(this.params.MARKET_PARAMS, null, 2)}`,
       0,
       true,
@@ -59,7 +59,7 @@ export class Strategy {
     );
     await this.okxService.init();
     await this.aarkService.init();
-    cron.schedule('0 * * * *', () => {
+    cron.schedule("0 * * * *", () => {
       this._logBalanceToSlack();
     });
   }
@@ -108,8 +108,8 @@ export class Strategy {
         )
       ) {
         this.monitorService.slackMessage(
-          'Data Validation Fail',
-          '',
+          "Data Validation Fail",
+          "",
           60_000,
           false,
           false
@@ -251,19 +251,19 @@ export class Strategy {
     const MARKET_PARAMS = JSON.parse(process.env.MARKET_PARAMS!);
     if (
       !checkObjectKeys(Object.values(MARKET_PARAMS), [
-        'EMA_WINDOW',
-        'BASE_PRICE_DIFF_THRESHOLD',
-        'MIN_PRICE_DIFF_THRESHOLD',
-        'MAX_POSITION_USDT',
-        'MAX_ORDER_USDT',
-        'MIN_ORDER_USDT',
-        'MIN_ORDER_INTERVAL_MS',
-        'UNHEDGED_THRESHOLD_USDT',
-        'AARK_FUNDING_MULTIPLIER',
-        'MAX_MARKET_SKEWNESS_USDT',
+        "EMA_WINDOW",
+        "BASE_PRICE_DIFF_THRESHOLD",
+        "MIN_PRICE_DIFF_THRESHOLD",
+        "MAX_POSITION_USDT",
+        "MAX_ORDER_USDT",
+        "MIN_ORDER_USDT",
+        "MIN_ORDER_INTERVAL_MS",
+        "UNHEDGED_THRESHOLD_USDT",
+        "AARK_FUNDING_MULTIPLIER",
+        "MAX_MARKET_SKEWNESS_USDT",
       ])
     ) {
-      throw new Error('Market key test failed. Check keys for each param.');
+      throw new Error("Market key test failed. Check keys for each param.");
     }
     this.params = {
       INITIAL_BALANCE_USDT,
@@ -277,7 +277,7 @@ export class Strategy {
 
   _logBalanceToSlack() {
     this.monitorService.slackMessage(
-      'BALANCE INFO',
+      "BALANCE INFO",
       JSON.stringify({
         aark: this.aarkService.getBalance(),
         okx: this.okxService.getBalance(),
@@ -293,43 +293,37 @@ export class Strategy {
     const dataFetchLatencyInfo: { [key: string]: number } = {};
     await Promise.all([
       this.aarkService.fetchIndexPrices().then(() => {
-        dataFetchLatencyInfo['aarkService.fetchIndexPrices'] =
+        dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
           Date.now() - timestamp;
       }),
       this.aarkService.fetchUserStatus().then(() => {
-        dataFetchLatencyInfo['aarkService.fetchUserStatus'] =
+        dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
           Date.now() - timestamp;
       }),
-      ,
       this.aarkService.fetchMarketStatuses().then(() => {
-        dataFetchLatencyInfo['aarkService.fetchMarketStatuses'] =
+        dataFetchLatencyInfo["aarkService.fetchMarketStatuses"] =
           Date.now() - timestamp;
       }),
       this.okxService.fetchOpenOrders().then(() => {
-        dataFetchLatencyInfo['okxService.fetchOpenOrders'] =
+        dataFetchLatencyInfo["okxService.fetchOpenOrders"] =
           Date.now() - timestamp;
       }),
-      ,
       this.okxService.fetchPositions().then(() => {
-        dataFetchLatencyInfo['okxService.fetchPositions'] =
+        dataFetchLatencyInfo["okxService.fetchPositions"] =
           Date.now() - timestamp;
       }),
-      ,
       this.okxService.fetchBalances().then(() => {
-        dataFetchLatencyInfo['okxService.fetchBalances'] =
+        dataFetchLatencyInfo["okxService.fetchBalances"] =
           Date.now() - timestamp;
       }),
-      ,
       this.okxService.fetchOrderbooks().then(() => {
-        dataFetchLatencyInfo['okxService.fetchOrderbooks'] =
+        dataFetchLatencyInfo["okxService.fetchOrderbooks"] =
           Date.now() - timestamp;
       }),
-      ,
       this.okxService.fetchFundingRate().then(() => {
-        dataFetchLatencyInfo['okxService.fetchFundingRate'] =
+        dataFetchLatencyInfo["okxService.fetchFundingRate"] =
           Date.now() - timestamp;
       }),
-      ,
     ]);
     const dataFetchingTime = Date.now() - timestamp;
     console.log(JSON.stringify(dataFetchLatencyInfo));
@@ -354,10 +348,10 @@ export class Strategy {
     }
 
     const okxBalanceUSDT = okxBalance
-      .filter((balance) => balance.currency === 'USDT')
+      .filter((balance) => balance.currency === "USDT")
       .reduce((acc, balance) => acc + balance.total, 0);
     const aarkBalanceUSDC = aarkBalance
-      .filter((balance) => balance.currency === 'USDC')
+      .filter((balance) => balance.currency === "USDC")
       .reduce((acc, balance) => acc + balance.total, 0);
     console.log(
       JSON.stringify({
@@ -374,7 +368,7 @@ export class Strategy {
         this.params.BALANCE_RATIO_DIFF_THRESHOLD
     ) {
       this.monitorService.slackMessage(
-        'OKX BALANCE OUT OF RANGE',
+        "OKX BALANCE OUT OF RANGE",
         `okx balance USDT : ${formatNumber(
           okxBalanceUSDT,
           2
@@ -723,9 +717,9 @@ export class Strategy {
         new Set(
           cexActionParams
             .concat(aarkActionParams)
-            .map((ap) => ap.symbol.split('_')[0])
+            .map((ap) => ap.symbol.split("_")[0])
         )
-      ).join(',');
+      ).join(",");
       this.monitorService.slackMessage(
         `Arbitrage Detected : ${cryptoList}`,
         `\n*CEX ORDER*\n${JSON.stringify(
