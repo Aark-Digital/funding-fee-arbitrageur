@@ -19,6 +19,7 @@ import { formatNumber, round_dp } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
 import { EIGHT_HOUR_IN_MS } from "../utils/time";
 import { isValidData } from "../utils/validation";
+import { MarketIndicator } from "src/interfaces/okxAarkArbitrage-interface";
 
 export class Strategy {
   private readonly aarkService: AarkService;
@@ -79,6 +80,8 @@ export class Strategy {
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
 
+    const marketIndicators = this._getMarketIndicators();
+
     const cryptoList: string[] = Object.keys(marketParams);
     const okxUSDCOrderbook = okxMarkets[`USDC_USDT`].orderbook!;
     const USDC_USDT_PRICE =
@@ -87,12 +90,14 @@ export class Strategy {
     let hedged = true;
     let arbitrageFound = false;
     const detectionStart = Date.now();
+
     for (const crypto of cryptoList) {
       const marketArbitrageInfo: any = {
         crypto,
       };
       const okxMarket = okxMarkets[`${crypto}_USDT`];
       const aarkMarket = aarkMarkets[`${crypto}_USDC`];
+      const marketIndicator = marketIndicators[crypto];
 
       if (
         !isValidData(
@@ -140,13 +145,12 @@ export class Strategy {
         break;
       }
 
-      let [orderSizeInAark, thresholdInfo] = this._getArbAmountInAark(
-        crypto,
-        okxMarket,
-        aarkMarket,
+      let orderSizeInAark = this._getOrderAmountInAark(
+        marketIndicator,
         USDC_USDT_PRICE
       );
-      Object.assign(marketArbitrageInfo, thresholdInfo);
+
+      Object.assign(marketArbitrageInfo, { marketIndicator });
 
       orderSizeInAark = applyQtyPrecision(orderSizeInAark, [
         okxMarket.marketInfo,
@@ -304,6 +308,10 @@ export class Strategy {
         dataFetchLatencyInfo["aarkService.fetchMarketStatuses"] =
           Date.now() - timestamp;
       }),
+      this.aarkService.fetchLpPoolValue().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchLpPoolValue"] =
+          Date.now() - timestamp;
+      }),
       this.okxService.fetchOpenOrders().then(() => {
         dataFetchLatencyInfo["okxService.fetchOpenOrders"] =
           Date.now() - timestamp;
@@ -378,6 +386,106 @@ export class Strategy {
         true
       );
     }
+  }
+
+  _getMarketIndicators(): {
+    [crypto: string]: MarketIndicator;
+  } {
+    const marketParams = this.params.MARKET_PARAMS;
+    const okxMarkets = this.okxService.getMarketInfo();
+    const aarkMarkets = this.aarkService.getMarketInfo();
+    const alpPoolValue = this.aarkService.getLpPoolValue();
+    const marketIndicators: MarketIndicator[] = [];
+    const USDC_USDT_PRICE =
+      (okxMarkets["USDC_USDT"].orderbook!.asks[0][0] +
+        okxMarkets["USDC_USDT"].orderbook!.bids[0][0]) /
+      2;
+    for (const crypto of Object.keys(marketParams)) {
+      const okxMarket = aarkMarkets[`${crypto}_USDC`];
+      const aarkMarket = aarkMarkets[`${crypto}_USDT`];
+      const price =
+        (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
+      const marketParam = marketParams[crypto];
+
+      const aarkStatus = aarkMarket.marketStatus!;
+
+      const targetAarkPositionTheo =
+        -(aarkStatus.skewness - okxMarket.position!.size) / 3;
+      let targetAarkPosition = targetAarkPositionTheo;
+      // = Math.min(
+      //   Math.abs(targetAarkPositionUSDTTheo),
+      //   marketParam.MAX_POSITION_USDT
+      // );
+      // targetAarkPositionUSDT =
+      //   targetAarkPositionUSDTTheo > 0
+      //     ? targetAarkPositionUSDT
+      //     : -targetAarkPositionUSDT;
+      const skewnessAfter =
+        aarkStatus.skewness - okxMarket.position!.size + targetAarkPosition;
+      const okxFundingTimeLeft =
+        okxMarket.fundingRate!.fundingTime - Date.now(); // milliseconds
+      const aarkFundingTerm =
+        (-((aarkStatus.coefficient * skewnessAfter) / aarkStatus.depthFactor) *
+          Math.max(
+            1,
+            (skewnessAfter * aarkMarket.indexPrice!) /
+              (alpPoolValue! * aarkStatus.targetLeverage)
+          ) *
+          (okxFundingTimeLeft / EIGHT_HOUR_IN_MS)) /
+        100;
+      const okxFundingTerm =
+        okxMarket.fundingRate!.fundingRate *
+        (1 - (okxFundingTimeLeft / EIGHT_HOUR_IN_MS) ** 2);
+      let expectedFundingRate = -aarkFundingTerm + okxFundingTerm;
+
+      marketIndicators.push({
+        crypto,
+        // targetAarkPositionUSDTTheo,
+        targetAarkPosition,
+        expectedFundingRate,
+        aarkFundingTerm,
+        okxFundingTerm,
+      });
+    }
+    marketIndicators.sort(
+      (a, b) => b.expectedFundingRate - a.expectedFundingRate
+    );
+
+    let totalPositionUSDT = 0;
+    const targetAarkPositions: { [crypto: string]: MarketIndicator } = {};
+    for (const marketIndicator of marketIndicators) {
+      const marketParam = marketParams[marketIndicator.crypto];
+      const okxMarket = aarkMarkets[`${crypto}_USDC`];
+      const aarkMarket = aarkMarkets[`${crypto}_USDT`];
+      const price =
+        (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
+      let targetAarkPosition = marketIndicator.targetAarkPosition;
+
+      if (
+        Math.abs(marketIndicator.expectedFundingRate) <
+        marketParam.MIN_EXPECTED_FUNDING_RATE
+      ) {
+        targetAarkPosition = 0;
+      }
+
+      // if (
+      //   Math.abs(targetAarkPosition) <
+      //   marketParam.MIN_POSITION_USDT / price
+      // ) {
+      //   targetAarkPosition = 0;
+      // }
+
+      targetAarkPosition =
+        Math.min(
+          this.params.MAX_TOTAL_POSITION_USDT - totalPositionUSDT,
+          Math.abs(targetAarkPosition) * price
+        ) / price;
+
+      totalPositionUSDT += Math.abs(targetAarkPosition) * price;
+      targetAarkPositions[marketIndicator.crypto] = marketIndicator;
+    }
+
+    return targetAarkPositions;
   }
 
   _updatePremiumEMA(
@@ -458,11 +566,6 @@ export class Strategy {
       this.localState.lastOrderTimestamp[crypto] !== undefined &&
       this.localState.lastOrderTimestamp[crypto] > timestamp - interval
     ) {
-      console.log(
-        crypto,
-        this.localState.lastOrderTimestamp[crypto],
-        timestamp
-      );
       return true;
     } else {
       return false;
@@ -506,8 +609,8 @@ export class Strategy {
     threshold: number,
     usdcPrice: number
   ): number {
-    const depthFactor = Number(aarkMarketStatus.depthFactor);
-    const skewness = Number(aarkMarketStatus.skewness);
+    const depthFactor = aarkMarketStatus.depthFactor;
+    const skewness = aarkMarketStatus.skewness;
 
     // Aark Buy
     let orderSizeInAark = 0;
@@ -540,8 +643,8 @@ export class Strategy {
     threshold: number,
     usdcPrice: number
   ): number {
-    const depthFactor = Number(aarkMarketStatus.depthFactor);
-    const skewness = Number(aarkMarketStatus.skewness);
+    const depthFactor = aarkMarketStatus.depthFactor;
+    const skewness = aarkMarketStatus.skewness;
 
     let orderSizeInAark = 0;
     for (const [p, q] of okxOrderbook.asks) {
@@ -612,93 +715,42 @@ export class Strategy {
     );
   }
 
-  _getArbAmountInAark(
-    crypto: string,
-    okxMarket: IMarket,
-    aarkMarket: IAarkMarket,
+  _getOrderAmountInAark(
+    marketIndicator: MarketIndicator,
     usdcPrice: number
-  ): [number, { enterLong: number; enterShort: number }] {
-    const okxOrderbook = okxMarket.orderbook!;
-    const okxMidUSDT = (okxOrderbook.bids[0][0] + okxOrderbook.asks[0][0]) / 2;
-    const okxMarketInfo = okxMarket.marketInfo!;
-    const okxFundingRate = okxMarket.fundingRate!;
-    const okxPosition = okxMarket.position!;
-    const aarkStatus = aarkMarket.marketStatus!;
-    const aarkIndexPrice = aarkMarket.indexPrice!;
-    const aarkPosition = aarkMarket.position!;
-    const aarkFundingRate = aarkStatus.fundingRatePrice24h / aarkIndexPrice;
+  ): number {
+    const crypto = marketIndicator.crypto;
+    const okxMarket = this.okxService.getMarketInfo()[`${crypto}_USDT`];
+    const aarkMarket = this.aarkService.getMarketInfo()[`${crypto}_USDC`];
+    const marketParam = this.params.MARKET_PARAMS[crypto];
     const premiumEMA = this.localState.premiumEMA[crypto].value;
 
-    const enterLongThreshold = this._calcEnterThreshold(
-      crypto,
-      okxFundingRate,
-      aarkFundingRate,
-      premiumEMA,
-      true
-    );
-    const enterShortThreshold = this._calcEnterThreshold(
-      crypto,
-      okxFundingRate,
-      aarkFundingRate,
-      premiumEMA,
-      false
-    );
-
-    const thresholdInfo = {
-      enterLong: round_dp(enterLongThreshold, 8),
-      enterShort: round_dp(enterShortThreshold, 8),
-    };
-
-    let orderSizeInAark;
-    // ENTER AARK LONG
-    orderSizeInAark = this._getArbBuyAmountInAark(
-      okxOrderbook,
-      okxMarket.marketInfo,
-      aarkStatus,
-      aarkIndexPrice,
-      enterLongThreshold,
-      usdcPrice
-    );
-    if (orderSizeInAark > 0) {
-      // console.log(`ENTER LONG ${formatNumber(orderSizeInAark, 8)}`);
-      return [
-        this._limitBuyOrderSize(
-          crypto,
-          orderSizeInAark,
-          okxMidUSDT,
-          aarkPosition.size,
-          aarkStatus.skewness,
-          false
-        ),
-        thresholdInfo,
-      ];
+    const targetPositionDelta =
+      marketIndicator.targetAarkPosition - aarkMarket.position!.size;
+    let orderSizeInAark = 0;
+    if (targetPositionDelta > 0) {
+      orderSizeInAark = this._getArbBuyAmountInAark(
+        okxMarket.orderbook!,
+        okxMarket.marketInfo,
+        aarkMarket.marketStatus!,
+        aarkMarket.indexPrice!,
+        premiumEMA - marketParam.BASE_PRICE_DIFF_THRESHOLD,
+        usdcPrice
+      );
+      return Math.min(targetPositionDelta, orderSizeInAark);
+    } else if (targetPositionDelta < 0) {
+      orderSizeInAark = this._getArbSellAmountInAark(
+        okxMarket.orderbook!,
+        okxMarket.marketInfo,
+        aarkMarket.marketStatus!,
+        aarkMarket.indexPrice!,
+        premiumEMA + marketParam.BASE_PRICE_DIFF_THRESHOLD,
+        usdcPrice
+      );
+      return Math.max(targetPositionDelta, orderSizeInAark);
+    } else {
+      return 0;
     }
-
-    // ENTER AARK SHORT
-    orderSizeInAark = this._getArbSellAmountInAark(
-      okxOrderbook,
-      okxMarket.marketInfo,
-      aarkStatus,
-      aarkIndexPrice,
-      enterShortThreshold,
-      usdcPrice
-    );
-    if (orderSizeInAark < 0) {
-      // console.log(`ENTER SHORT ${formatNumber(orderSizeInAark, 8)}`);
-      return [
-        this._limitSellOrderSize(
-          crypto,
-          orderSizeInAark,
-          okxMidUSDT,
-          aarkPosition.size,
-          aarkStatus.skewness,
-          false
-        ),
-        thresholdInfo,
-      ];
-    }
-
-    return [0, thresholdInfo];
   }
 
   _logActionParams(actionParams: IActionParam[]) {
