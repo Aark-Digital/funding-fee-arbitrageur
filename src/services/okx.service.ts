@@ -14,14 +14,14 @@ import {
   floor_dp,
   numberToPrecision,
 } from "../utils/number";
-import { Balance } from "src/interfaces/basic-interface";
+import { Balance } from "../interfaces/basic-interface";
 import { stream } from "tardis-dev";
 import AVLTree from "avl";
 import {
   avlTreeToArray,
   emptyAVLTree,
   updateAVLTree,
-} from "src/utils/orderbook";
+} from "../utils/orderbook";
 import { MonitorService } from "./monitor.service";
 
 export class OkxSwapService {
@@ -187,9 +187,10 @@ export class OkxSwapService {
   async fetchOrderbooks() {
     try {
       this.symbolList.forEach((symbol: string, idx: number) => {
-        const asks = this.avlOrderbooks[symbol].asks;
-        const bids = this.avlOrderbooks[symbol].bids;
-        const timestamp = this.avlOrderbooks[symbol].timestamp;
+        const orderbook = this.avlOrderbooks[this.getFormattedSymbol(symbol)];
+        const asks = orderbook.asks;
+        const bids = orderbook.bids;
+        const timestamp = orderbook.timestamp;
         this.markets[symbol].orderbook = {
           symbol: symbol,
           bids: avlTreeToArray(bids),
@@ -209,13 +210,34 @@ export class OkxSwapService {
   async fetchPositions() {
     const timestamp = new Date().getTime();
     try {
-      const positions = await this._privateGet("/api/v5/account/positions", {
-        instType: "SWAP",
-        instId: this.symbolList.map(this.getFormattedSymbol).join(","),
-      });
+      const totalChunksNumber = Math.floor((this.symbolList.length + 9) / 10);
+      const symbolChunks = Array.from(
+        new Array(totalChunksNumber),
+        (_, i: number) =>
+          this.symbolList.filter(
+            (_: any, j: number) => Math.floor(j / 10) === i
+          )
+      );
+      const positionResponses = await Promise.all(
+        symbolChunks.map((chunk: string[]) =>
+          this._privateGet("/api/v5/account/positions", {
+            instType: "SWAP",
+            instId: chunk.map(this.getFormattedSymbol).join(","),
+          }).then((response: any) => response.data)
+        )
+      );
+      const positions = positionResponses.reduce(
+        (acc: any[], positionResponse: any) => acc.concat(positionResponse),
+        []
+      );
+      // const positions = await this._privateGet("/api/v5/account/positions", {
+      //   instType: "SWAP",
+      //   instId: this.symbolList.map(this.getFormattedSymbol).join(","),
+      // });
+      // console.log(positions);
       this.symbolList.forEach((symbol: string, idx: number) => {
         const contractSize = this.markets[symbol].marketInfo.contractSize;
-        const position = positions.data.find(
+        const position = positions.find(
           (pos: any) =>
             pos.mgnMode === "cross" &&
             pos.instId === this.getFormattedSymbol(symbol)
