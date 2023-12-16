@@ -40,7 +40,7 @@ export class Strategy {
       this.params.TARGET_CRYPTO_LIST.map((symbol: string) => `${symbol}_USDC`)
     );
     this.okxService = new OkxSwapService(
-      process.env.OKX_API_KEY!,
+      process.env.OKX_KEY!,
       process.env.OKX_API_SECRET!,
       process.env.OKX_API_PASSWORD!,
       this.params.TARGET_CRYPTO_LIST.map(
@@ -153,7 +153,13 @@ export class Strategy {
         okxMarket.marketInfo,
         aarkMarket.marketInfo,
       ]);
-      if (Math.abs(orderSizeInAark) * okxMidUSDT < this.params.MIN_ORDER_USDT) {
+      if (
+        !(
+          marketIndicator.targetAarkPosition === 0 &&
+          okxMarket.position!.size * okxMidUSDT <= this.params.MIN_ORDER_USDT
+        ) &&
+        Math.abs(orderSizeInAark) * okxMidUSDT < this.params.MIN_ORDER_USDT
+      ) {
         orderSizeInAark = 0;
       }
       Object.assign(marketArbitrageInfo, {
@@ -379,9 +385,24 @@ export class Strategy {
       JSON.stringify({
         okxUSDT: round_dp(okxBalanceUSDT, 2),
         aarkUSDC: round_dp(aarkBalanceUSDC, 2),
+        totalUSDT: round_dp(okxBalanceUSDT + aarkBalanceUSDC, 2),
       })
     );
     if (
+      okxBalanceUSDT + aarkBalanceUSDC <
+      this.params.INITIAL_BALANCE_USDT * 0.95
+    ) {
+      this.monitorService.slackMessage(
+        "TOTAL BALANCE TOO LOW",
+        `okx balance USDT : ${formatNumber(
+          okxBalanceUSDT,
+          2
+        )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
+        60_000,
+        true,
+        true
+      );
+    } else if (
       Math.abs(
         okxBalanceUSDT -
           this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_OKX
@@ -399,8 +420,7 @@ export class Strategy {
         true,
         true
       );
-    }
-    if (
+    } else if (
       Math.abs(
         aarkBalanceUSDC -
           this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_AARK
@@ -433,8 +453,8 @@ export class Strategy {
         okxMarkets["USDC_USDT"].orderbook!.bids[0][0]) /
       2;
     for (const crypto of this.params.TARGET_CRYPTO_LIST) {
-      const okxMarket = aarkMarkets[`${crypto}_USDC`];
-      const aarkMarket = aarkMarkets[`${crypto}_USDT`];
+      const okxMarket = okxMarkets[`${crypto}_USDT`];
+      const aarkMarket = aarkMarkets[`${crypto}_USDC`];
 
       const aarkStatus = aarkMarket.marketStatus!;
 
@@ -454,54 +474,45 @@ export class Strategy {
       const okxFundingTimeLeft =
         okxMarket.fundingRate!.fundingTime - Date.now(); // milliseconds
       const aarkFundingTerm =
-        (-((aarkStatus.coefficient * skewnessAfter) / aarkStatus.depthFactor) *
+        (((-(aarkStatus.coefficient * skewnessAfter) / aarkStatus.depthFactor) *
           Math.max(
             1,
             (skewnessAfter * aarkMarket.indexPrice!) /
               (alpPoolValue! * aarkStatus.targetLeverage)
-          ) *
-          (okxFundingTimeLeft / EIGHT_HOUR_IN_MS)) /
-        100;
+          )) /
+          100) *
+        (targetAarkPosition > 0 ? 1 : -1);
+
       const okxFundingTerm =
         okxMarket.fundingRate!.fundingRate *
-        (1 - (okxFundingTimeLeft / EIGHT_HOUR_IN_MS) ** 2);
-      let expectedFundingRate = -aarkFundingTerm + okxFundingTerm;
+        (1 - (okxFundingTimeLeft / EIGHT_HOUR_IN_MS) ** 2) *
+        (targetAarkPosition > 0 ? 1 : -1);
 
       marketIndicators.push({
         crypto,
         // targetAarkPositionUSDTTheo,
         targetAarkPosition,
-        expectedFundingRate,
         aarkFundingTerm,
         okxFundingTerm,
       });
     }
-    marketIndicators.sort(
-      (a, b) => b.expectedFundingRate - a.expectedFundingRate
-    );
+    marketIndicators.sort((a, b) => b.aarkFundingTerm - a.aarkFundingTerm);
 
     let totalPositionUSDT = 0;
     const targetAarkPositions: { [crypto: string]: MarketIndicator } = {};
     for (const marketIndicator of marketIndicators) {
-      const okxMarket = aarkMarkets[`${crypto}_USDC`];
-      const aarkMarket = aarkMarkets[`${crypto}_USDT`];
+      const crypto = marketIndicator.crypto;
+      const okxMarket = okxMarkets[`${crypto}_USDT`];
       const price =
         (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
       let targetAarkPosition = marketIndicator.targetAarkPosition;
 
       if (
-        Math.abs(marketIndicator.expectedFundingRate) <
-        this.params.MIN_EXPECTED_FUNDING_RATE
+        Math.abs(marketIndicator.okxFundingTerm) <
+        -this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD
       ) {
         targetAarkPosition = 0;
       }
-
-      // if (
-      //   Math.abs(targetAarkPosition) <
-      //   marketParam.MIN_POSITION_USDT / price
-      // ) {
-      //   targetAarkPosition = 0;
-      // }
 
       targetAarkPosition =
         Math.min(
@@ -510,6 +521,8 @@ export class Strategy {
         ) / price;
 
       totalPositionUSDT += Math.abs(targetAarkPosition) * price;
+      marketIndicator.targetAarkPosition =
+        targetAarkPosition < 1e-5 ? 0 : targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
     }
 
@@ -615,7 +628,7 @@ export class Strategy {
         2 *
           (100 *
             depthFactor *
-            (((p / usdcPrice) * (1 - threshold)) / aarkIndexPrice - 1) -
+            (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) -
             skewness) -
           orderSizeInAark
       );
@@ -645,23 +658,23 @@ export class Strategy {
     for (const [p, q] of okxOrderbook.asks) {
       const deltaAmount = Math.min(
         q * okxMarketInfo.contractSize,
-        2 *
-          (-100 *
+        -2 *
+          (100 *
             depthFactor *
-            (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) +
-            skewness) +
+            (((p / usdcPrice) * (1 + threshold)) / aarkIndexPrice - 1) -
+            skewness) -
           orderSizeInAark
       );
       if (deltaAmount < 0) {
         break;
       }
-      orderSizeInAark -= deltaAmount;
+      orderSizeInAark += deltaAmount;
       if (deltaAmount !== q) {
         break;
       }
     }
 
-    return orderSizeInAark;
+    return -orderSizeInAark;
   }
 
   _getOrderAmountInAark(
