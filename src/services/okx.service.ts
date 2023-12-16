@@ -23,6 +23,7 @@ import {
   updateAVLTree,
 } from "../utils/orderbook";
 import { MonitorService } from "./monitor.service";
+import { sleep } from "../utils/time";
 
 export class OkxSwapService {
   private baseUrl: string = "https://www.okx.com";
@@ -69,6 +70,7 @@ export class OkxSwapService {
   }
 
   async init() {
+    this.initializeOrderbookStream();
     const totalMarketInfo = await this._publicGet(
       "/api/v5/public/instruments",
       {
@@ -86,7 +88,8 @@ export class OkxSwapService {
         qtyPrecision: numberToPrecision(marketInfo.lotSz),
       };
     });
-    this.initializeOrderbookStream();
+
+    await sleep(5000);
   }
 
   private async initializeOrderbookStream() {
@@ -107,6 +110,7 @@ export class OkxSwapService {
       }
       const message = messageResponse.message;
       if (message.action === "snapshot") {
+        console.log("INITIALIZE ORDERBOK STREAM : ", message.arg.instId);
         const asks = emptyAVLTree(true);
         const bids = emptyAVLTree(false);
         for (const ask of message.data[0].asks) {

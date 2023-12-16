@@ -40,7 +40,7 @@ export class Strategy {
       targetCryptoList.map((symbol: string) => `${symbol}_USDC`)
     );
     this.okxService = new OkxSwapService(
-      process.env.OKX_API_KEY!,
+      process.env.OKX_KEY!,
       process.env.OKX_API_SECRET!,
       process.env.OKX_API_PASSWORD!,
       targetCryptoList
