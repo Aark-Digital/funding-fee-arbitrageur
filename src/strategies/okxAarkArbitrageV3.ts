@@ -388,10 +388,6 @@ export class Strategy {
     const timestamp = Date.now();
     const dataFetchLatencyInfo: { [key: string]: number } = {};
     await Promise.all([
-      this.aarkService.fetchIndexPrices().then(() => {
-        dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
-          Date.now() - timestamp;
-      }),
       this.aarkService.fetchUserStatus().then(() => {
         dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
           Date.now() - timestamp;
@@ -414,10 +410,6 @@ export class Strategy {
       }),
       this.okxService.fetchBalances().then(() => {
         dataFetchLatencyInfo["okxService.fetchBalances"] =
-          Date.now() - timestamp;
-      }),
-      this.okxService.fetchOrderbooks().then(() => {
-        dataFetchLatencyInfo["okxService.fetchOrderbooks"] =
           Date.now() - timestamp;
       }),
       this.okxService.fetchFundingRate().then(() => {
