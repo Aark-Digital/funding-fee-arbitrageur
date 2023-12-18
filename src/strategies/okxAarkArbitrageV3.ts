@@ -56,6 +56,8 @@ export class Strategy {
     await this.aarkService.init();
 
     await this._fetchData();
+    await this._fetchPriceData();
+
     this._logBalanceToSlack();
     cron.schedule("0 * * * *", () => {
       this._logBalanceToSlack();
@@ -71,6 +73,10 @@ export class Strategy {
     if (!(await this._fetchData())) {
       return;
     }
+    if (!(await this._fetchPriceData())) {
+      return;
+    }
+
     this._checkBalance();
 
     const okxMarkets = this.okxService.getMarketInfo();
@@ -416,6 +422,30 @@ export class Strategy {
       }),
       this.okxService.fetchFundingRate().then(() => {
         dataFetchLatencyInfo["okxService.fetchFundingRate"] =
+          Date.now() - timestamp;
+      }),
+    ]);
+    const dataFetchingTime = Date.now() - timestamp;
+    console.log(JSON.stringify(dataFetchLatencyInfo));
+    Object.assign(this.localState.arbSnapshot, { dataFetchingTime });
+    console.log(`Data fetched : ${dataFetchingTime}ms`);
+    if (dataFetchingTime > this.params.DATA_FETCH_TIME_THRESHOLD_MS) {
+      return false;
+    } else {
+      return true;
+    }
+  }
+
+  async _fetchPriceData() {
+    const timestamp = Date.now();
+    const dataFetchLatencyInfo: { [key: string]: number } = {};
+    await Promise.all([
+      this.aarkService.fetchIndexPrices().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
+          Date.now() - timestamp;
+      }),
+      this.okxService.fetchOrderbooks().then(() => {
+        dataFetchLatencyInfo["okxService.fetchOrderbooks"] =
           Date.now() - timestamp;
       }),
     ]);
