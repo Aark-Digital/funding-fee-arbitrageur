@@ -549,11 +549,10 @@ export class Strategy {
     const okxUSDTBalance = this._getOkxUSDTBalance();
     const aarkUSDCBalance = this._getAarkUSDCBalance();
     const maxPositionUSDT = Math.min(
-      this.params.MAX_POSITION_USDT,
+      this.params.MAX_TOTAL_POSITION_USDT,
       Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
         this.params.MAX_LEVERAGE
     );
-
     let totalAbsPositionUSDT = 0;
     const targetAarkPositions: { [crypto: string]: MarketIndicator } = {};
     for (const marketIndicator of marketIndicators) {
