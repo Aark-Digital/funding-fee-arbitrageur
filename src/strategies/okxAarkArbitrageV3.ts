@@ -12,7 +12,7 @@ import { MonitorService } from "../services/monitor.service";
 import { OkxSwapService } from "../services/okx.service";
 import { formatNumber, round_dp } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
-import { EIGHT_HOUR_IN_MS } from "../utils/time";
+import { ONE_HOUR_IN_MS } from "../utils/time";
 import { isValidData } from "../utils/validation";
 import { MarketIndicator } from "../interfaces/okxAarkArbitrage-interface";
 
@@ -511,8 +511,6 @@ export class Strategy {
       let targetAarkPosition = targetAarkPositionTheo;
       const skewnessAfter =
         aarkStatus.skewness - okxMarket.position!.size + targetAarkPosition;
-      const okxFundingTimeLeft =
-        okxMarket.fundingRate!.fundingTime - Date.now(); // milliseconds
       const aarkFundingTerm =
         (((-(aarkStatus.coefficient * skewnessAfter) / aarkStatus.depthFactor) *
           Math.max(
@@ -524,9 +522,7 @@ export class Strategy {
         (targetAarkPosition > 0 ? 1 : -1);
 
       const okxFundingTerm =
-        okxMarket.fundingRate!.fundingRate *
-        (1 - (okxFundingTimeLeft / EIGHT_HOUR_IN_MS) ** 2) *
-        (targetAarkPosition > 0 ? 1 : -1);
+        okxMarket.fundingRate!.fundingRate * (targetAarkPosition > 0 ? 1 : -1);
 
       marketIndicators.push({
         crypto,
@@ -545,7 +541,7 @@ export class Strategy {
         this.params.MAX_LEVERAGE
     );
 
-    let totalPositionUSDT = 0;
+    let totalAbsPositionUSDT = 0;
     const targetAarkPositions: { [crypto: string]: MarketIndicator } = {};
     for (const marketIndicator of marketIndicators) {
       const crypto = marketIndicator.crypto;
@@ -554,20 +550,22 @@ export class Strategy {
         (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
       let targetAarkPosition = marketIndicator.targetAarkPosition;
 
+      // Avoid okx funding term
       if (
         Math.abs(marketIndicator.okxFundingTerm) <
-        -this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD
+          -this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD &&
+        okxMarket.fundingRate!.fundingTime - Date.now() < ONE_HOUR_IN_MS
       ) {
         targetAarkPosition = 0;
       }
 
       targetAarkPosition =
         Math.min(
-          maxPositionUSDT - totalPositionUSDT,
+          maxPositionUSDT - totalAbsPositionUSDT,
           Math.abs(targetAarkPosition) * price
         ) / price;
 
-      totalPositionUSDT += Math.abs(targetAarkPosition) * price;
+      totalAbsPositionUSDT += Math.abs(targetAarkPosition) * price;
       marketIndicator.targetAarkPosition =
         targetAarkPosition < 1e-5 ? 0 : targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
