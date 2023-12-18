@@ -302,12 +302,58 @@ export class Strategy {
     };
   }
 
+  _getOkxUSDTBalance() {
+    const okxBalance = this.okxService.getBalance();
+    if (okxBalance === undefined) {
+      this.monitorService.slackMessage(
+        "BALANCE ERROR",
+        `Failed to fetch OKX balance`,
+        60,
+        true,
+        true
+      );
+      throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
+    }
+    const okxUSDT = okxBalance
+      .filter((balance) => balance.currency === "USDT")
+      .reduce((acc, balance) => acc + balance.total, 0);
+    return okxUSDT;
+  }
+
+  _getAarkUSDCBalance() {
+    const aarkBalance = this.aarkService.getBalance();
+    if (aarkBalance === undefined) {
+      this.monitorService.slackMessage(
+        "BALANCE ERROR",
+        `Failed to fetch AARK balance`,
+        60,
+        true,
+        true
+      );
+      throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
+    }
+    const aarkUSDC = aarkBalance
+      .filter((balance) => balance.currency === "USDC")
+      .reduce((acc, balance) => acc + balance.total, 0);
+    return aarkUSDC;
+  }
+
+  _getUSDCUSDTPrice() {
+    const orderbook = this.okxService.getMarketInfo()["USDC_USDT"].orderbook!;
+    return (orderbook.asks[0][0] + orderbook.bids[0][0]) / 2;
+  }
+
   _logBalanceToSlack() {
+    const okx = this._getOkxUSDTBalance();
+    const aark = this._getAarkUSDCBalance();
+    const USDC_USDT_PRICE = this._getUSDCUSDTPrice();
     this.monitorService.slackMessage(
       "BALANCE INFO",
       JSON.stringify({
-        aark: this.aarkService.getBalance(),
-        okx: this.okxService.getBalance(),
+        "AARK USDC Balance": okx.toFixed(2),
+        "OKX USDT Balance": aark.toFixed(2),
+        "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
+        "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
       }),
       60_000,
       false,
@@ -368,27 +414,17 @@ export class Strategy {
   }
 
   _checkBalance() {
-    const okxBalance = this.okxService.getBalance();
-    if (okxBalance === undefined) {
-      throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
-    }
-
-    const aarkBalance = this.aarkService.getBalance();
-    if (aarkBalance === undefined) {
-      throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
-    }
-
-    const okxBalanceUSDT = okxBalance
-      .filter((balance) => balance.currency === "USDT")
-      .reduce((acc, balance) => acc + balance.total, 0);
-    const aarkBalanceUSDC = aarkBalance
-      .filter((balance) => balance.currency === "USDC")
-      .reduce((acc, balance) => acc + balance.total, 0);
+    const okxBalanceUSDT = this._getOkxUSDTBalance();
+    const aarkBalanceUSDC = this._getAarkUSDCBalance();
+    const USDC_USDT_PRICE = this._getUSDCUSDTPrice();
     console.log(
       JSON.stringify({
         okxUSDT: round_dp(okxBalanceUSDT, 2),
         aarkUSDC: round_dp(aarkBalanceUSDC, 2),
-        totalUSDT: round_dp(okxBalanceUSDT + aarkBalanceUSDC, 2),
+        totalUSDT: round_dp(
+          okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
+          2
+        ),
       })
     );
     if (
