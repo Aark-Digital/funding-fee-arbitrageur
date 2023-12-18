@@ -609,7 +609,10 @@ export class Strategy {
       targetAarkPosition =
         ((targetAarkPosition > 0 ? 1 : -1) *
         Math.min(
-            Math.max(maxPositionUSDT - totalAbsPositionUSDT, 0),
+            Math.max(
+              maxPositionUSDT - totalAbsPositionUSDT + positionUSDTValue,
+              0
+            ),
           Math.abs(targetAarkPosition) * price
           )) /
         price;
