@@ -238,15 +238,16 @@ export class Strategy {
   _readEnvParams() {
     const [
       EMA_WINDOW,
-      BASE_PRICE_DIFF_THRESHOLD,
       UNHEDGED_THRESHOLD_USDT,
+      BASE_PRICE_DIFF_THRESHOLD,
+      OKX_FUNDING_RATE_DODGE_THRESHOLD,
 
-      MAX_TOTAL_POSITION_USDT,
+      MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_TOTAL_POSITION_USDT,
 
       MIN_ORDER_USDT,
       MIN_ORDER_INTERVAL_MS,
-      MIN_EXPECTED_FUNDING_RATE,
 
       INITIAL_BALANCE_USDT,
       BALANCE_RATIO_IN_OKX,
@@ -256,15 +257,16 @@ export class Strategy {
       DATA_FETCH_TIME_THRESHOLD_MS,
     ] = [
       process.env.EMA_WINDOW!,
-      process.env.BASE_PRICE_DIFF_THRESHOLD!,
       process.env.UNHEDGED_THRESHOLD_USDT!,
+      process.env.BASE_PRICE_DIFF_THRESHOLD!,
+      process.env.OKX_FUNDING_RATE_DODGE_THRESHOLD!,
 
-      process.env.MAX_TOTAL_POSITION_USDT!,
+      process.env.MAX_LEVERAGE!,
       process.env.MAX_ORDER_USDT!,
+      process.env.MAX_TOTAL_POSITION_USDT!,
 
       process.env.MIN_ORDER_USDT!,
       process.env.MIN_ORDER_INTERVAL_MS!,
-      process.env.MIN_EXPECTED_FUNDING_RATE!,
 
       process.env.INITIAL_BALANCE_USDT!,
       process.env.BALANCE_RATIO_IN_OKX!,
@@ -280,15 +282,16 @@ export class Strategy {
       TARGET_CRYPTO_LIST,
 
       EMA_WINDOW,
-      BASE_PRICE_DIFF_THRESHOLD,
       UNHEDGED_THRESHOLD_USDT,
+      BASE_PRICE_DIFF_THRESHOLD,
+      OKX_FUNDING_RATE_DODGE_THRESHOLD,
 
-      MAX_TOTAL_POSITION_USDT,
+      MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_TOTAL_POSITION_USDT,
 
       MIN_ORDER_USDT,
       MIN_ORDER_INTERVAL_MS,
-      MIN_EXPECTED_FUNDING_RATE,
 
       INITIAL_BALANCE_USDT,
       BALANCE_RATIO_IN_OKX,
