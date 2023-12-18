@@ -45,6 +45,12 @@ export class Strategy {
   }
 
   async init() {
+    await this.okxService.init();
+    await this.aarkService.init();
+
+    await this._fetchData();
+    await this._fetchPriceData();
+
     this.monitorService.slackMessage(
       "ARBITRAGEUR START",
       `${JSON.stringify(this.params.TARGET_CRYPTO_LIST)}`,
@@ -52,12 +58,6 @@ export class Strategy {
       true,
       false
     );
-    await this.okxService.init();
-    await this.aarkService.init();
-
-    await this._fetchData();
-    await this._fetchPriceData();
-
     this._logBalanceToSlack();
     cron.schedule("0 * * * *", () => {
       this._logBalanceToSlack();
@@ -542,10 +542,10 @@ export class Strategy {
       const aarkStatus = aarkMarket.marketStatus!;
 
       const targetAarkPositionTheo =
-        -(aarkStatus.skewness - okxMarket.position!.size) / 3;
+        -(aarkStatus.skewness - aarkMarket.position!.size) / 3;
       let targetAarkPosition = targetAarkPositionTheo;
       const skewnessAfter =
-        aarkStatus.skewness - okxMarket.position!.size + targetAarkPosition;
+        aarkStatus.skewness - aarkMarket.position!.size + targetAarkPosition;
       const aarkFundingTerm =
         (((-(aarkStatus.coefficient * skewnessAfter) / aarkStatus.depthFactor) *
           Math.max(
@@ -558,7 +558,6 @@ export class Strategy {
 
       const okxFundingTerm =
         okxMarket.fundingRate!.fundingRate * (targetAarkPosition > 0 ? 1 : -1);
-
       marketIndicators.push({
         crypto,
         targetAarkPosition,
@@ -620,7 +619,8 @@ export class Strategy {
       marketIndicator.targetAarkPosition = targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
 
-      totalAbsPositionUSDT += Math.abs(targetAarkPosition) * price;
+      totalAbsPositionUSDT +=
+        Math.abs(targetAarkPosition) * price - positionUSDTValue;
     }
 
     return targetAarkPositions;
