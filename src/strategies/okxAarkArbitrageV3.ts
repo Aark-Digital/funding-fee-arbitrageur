@@ -77,9 +77,7 @@ export class Strategy {
     const marketIndicators = this._getMarketIndicators();
     console.log(JSON.stringify(marketIndicators));
 
-    const okxUSDCOrderbook = okxMarkets[`USDC_USDT`].orderbook!;
-    const USDC_USDT_PRICE =
-      (okxUSDCOrderbook.asks[0][0] + okxUSDCOrderbook.bids[0][0]) / 2;
+    const USDC_USDT_PRICE = this._getUSDCUSDTPrice();
 
     let hedged = true;
     let arbitrageFound = false;
@@ -89,13 +87,13 @@ export class Strategy {
       const marketArbitrageInfo: any = {
         crypto,
       };
-      const okxMarket = okxMarkets[`${crypto}_USDT`];
-      const aarkMarket = aarkMarkets[`${crypto}_USDC`];
-      const marketIndicator = marketIndicators[crypto];
 
       //////////
       // DATA //
       //////////
+      const okxMarket = okxMarkets[`${crypto}_USDT`];
+      const aarkMarket = aarkMarkets[`${crypto}_USDC`];
+      const marketIndicator = marketIndicators[crypto];
 
       if (
         !isValidData(
@@ -499,6 +497,18 @@ export class Strategy {
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
     const alpPoolValue = this.aarkService.getLpPoolValue();
+
+    if (alpPoolValue === undefined) {
+      this.monitorService.slackMessage(
+        `ALP POOL VALUE ERROR`,
+        `UNDEFINED alpPoolValue`,
+        60_000,
+        true,
+        true
+      );
+      throw new Error("Failed to fetch ALP Pool Value");
+    }
+
     const marketIndicators: MarketIndicator[] = [];
     const USDC_USDT_PRICE = this._getUSDCUSDTPrice();
     for (const crypto of this.params.TARGET_CRYPTO_LIST) {
@@ -517,7 +527,7 @@ export class Strategy {
           Math.max(
             1,
             (skewnessAfter * aarkMarket.indexPrice!) /
-              (alpPoolValue! * aarkStatus.targetLeverage)
+              (alpPoolValue * aarkStatus.targetLeverage)
           )) /
           100) *
         (targetAarkPosition > 0 ? 1 : -1);
@@ -565,10 +575,10 @@ export class Strategy {
           maxPositionUSDT - totalAbsPositionUSDT,
           Math.abs(targetAarkPosition) * price
         ) / price;
+      targetAarkPosition = targetAarkPosition < 1e-5 ? 0 : targetAarkPosition;
 
       totalAbsPositionUSDT += Math.abs(targetAarkPosition) * price;
-      marketIndicator.targetAarkPosition =
-        targetAarkPosition < 1e-5 ? 0 : targetAarkPosition;
+      marketIndicator.targetAarkPosition = targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
     }
 
