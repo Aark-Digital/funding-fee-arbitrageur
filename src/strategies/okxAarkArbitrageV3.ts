@@ -1,10 +1,5 @@
 import cron from "node-cron";
-import { checkObjectKeys } from "../utils/env";
-import {
-  FundingRate,
-  Orderbook,
-  Position,
-} from "../interfaces/basic-interface";
+import { Orderbook } from "../interfaces/basic-interface";
 import {
   IAarkMarket,
   IAarkMarketStatus,
@@ -79,6 +74,7 @@ export class Strategy {
     const aarkMarkets = this.aarkService.getMarketInfo();
 
     const marketIndicators = this._getMarketIndicators();
+    console.log(JSON.stringify(marketIndicators));
 
     const okxUSDCOrderbook = okxMarkets[`USDC_USDT`].orderbook!;
     const USDC_USDT_PRICE =
@@ -95,6 +91,10 @@ export class Strategy {
       const okxMarket = okxMarkets[`${crypto}_USDT`];
       const aarkMarket = aarkMarkets[`${crypto}_USDC`];
       const marketIndicator = marketIndicators[crypto];
+
+      //////////
+      // DATA //
+      //////////
 
       if (
         !isValidData(
@@ -127,6 +127,10 @@ export class Strategy {
         premiumEMA: this.localState.premiumEMA[crypto].value,
       });
 
+      /////////////////
+      // HEDGE LOGIC //
+      ////////////////
+
       const hedgeActionParams = this._getHedgeActionParam(
         crypto,
         okxMarket,
@@ -141,6 +145,10 @@ export class Strategy {
         this._updateLastOrderTimestamp(crypto, detectionStart);
         break;
       }
+
+      ////////////////
+      // MAIN LOGIC //
+      ////////////////
 
       let orderSizeInAark = this._getOrderAmountInAark(
         marketIndicator,
@@ -203,6 +211,10 @@ export class Strategy {
     }
     this._logActionParams(okxActionParams);
     this._logActionParams(aarkActionParams);
+
+    ///////////////
+    // EXECUTION //
+    ///////////////
 
     try {
       await Promise.all([
