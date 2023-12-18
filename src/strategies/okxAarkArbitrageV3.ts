@@ -400,10 +400,6 @@ export class Strategy {
         dataFetchLatencyInfo["aarkService.fetchLpPoolValue"] =
           Date.now() - timestamp;
       }),
-      this.okxService.fetchOpenOrders().then(() => {
-        dataFetchLatencyInfo["okxService.fetchOpenOrders"] =
-          Date.now() - timestamp;
-      }),
       this.okxService.fetchPositions().then(() => {
         dataFetchLatencyInfo["okxService.fetchPositions"] =
           Date.now() - timestamp;
@@ -421,7 +417,7 @@ export class Strategy {
     console.log(JSON.stringify(dataFetchLatencyInfo));
     Object.assign(this.localState.arbSnapshot, { dataFetchingTime });
     console.log(`Data fetched : ${dataFetchingTime}ms`);
-    if (dataFetchingTime > this.params.DATA_FETCH_TIME_THRESHOLD_MS) {
+    if (dataFetchingTime > 2000) {
       return false;
     } else {
       return true;
