@@ -487,10 +487,7 @@ export class Strategy {
     const aarkMarkets = this.aarkService.getMarketInfo();
     const alpPoolValue = this.aarkService.getLpPoolValue();
     const marketIndicators: MarketIndicator[] = [];
-    const USDC_USDT_PRICE =
-      (okxMarkets["USDC_USDT"].orderbook!.asks[0][0] +
-        okxMarkets["USDC_USDT"].orderbook!.bids[0][0]) /
-      2;
+    const USDC_USDT_PRICE = this._getUSDCUSDTPrice();
     for (const crypto of this.params.TARGET_CRYPTO_LIST) {
       const okxMarket = okxMarkets[`${crypto}_USDT`];
       const aarkMarket = aarkMarkets[`${crypto}_USDC`];
@@ -500,14 +497,6 @@ export class Strategy {
       const targetAarkPositionTheo =
         -(aarkStatus.skewness - okxMarket.position!.size) / 3;
       let targetAarkPosition = targetAarkPositionTheo;
-      // = Math.min(
-      //   Math.abs(targetAarkPositionUSDTTheo),
-      //   marketParam.MAX_POSITION_USDT
-      // );
-      // targetAarkPositionUSDT =
-      //   targetAarkPositionUSDTTheo > 0
-      //     ? targetAarkPositionUSDT
-      //     : -targetAarkPositionUSDT;
       const skewnessAfter =
         aarkStatus.skewness - okxMarket.position!.size + targetAarkPosition;
       const okxFundingTimeLeft =
@@ -529,13 +518,20 @@ export class Strategy {
 
       marketIndicators.push({
         crypto,
-        // targetAarkPositionUSDTTheo,
         targetAarkPosition,
         aarkFundingTerm,
         okxFundingTerm,
       });
     }
     marketIndicators.sort((a, b) => b.aarkFundingTerm - a.aarkFundingTerm);
+
+    const okxUSDTBalance = this._getOkxUSDTBalance();
+    const aarkUSDCBalance = this._getAarkUSDCBalance();
+    const maxPositionUSDT = Math.min(
+      this.params.MAX_POSITION_USDT,
+      Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
+        this.params.MAX_LEVERAGE
+    );
 
     let totalPositionUSDT = 0;
     const targetAarkPositions: { [crypto: string]: MarketIndicator } = {};
@@ -555,7 +551,7 @@ export class Strategy {
 
       targetAarkPosition =
         Math.min(
-          this.params.MAX_TOTAL_POSITION_USDT - totalPositionUSDT,
+          maxPositionUSDT - totalPositionUSDT,
           Math.abs(targetAarkPosition) * price
         ) / price;
 
@@ -723,9 +719,12 @@ export class Strategy {
     const crypto = marketIndicator.crypto;
     const okxMarket = this.okxService.getMarketInfo()[`${crypto}_USDT`];
     const aarkMarket = this.aarkService.getMarketInfo()[`${crypto}_USDC`];
+
     const premiumEMA = this.localState.premiumEMA[crypto].value;
-    const midPrice =
-      (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
+    const midPriceUSDC =
+      (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) /
+      2 /
+      usdcPrice;
 
     const targetPositionDelta =
       marketIndicator.targetAarkPosition - aarkMarket.position!.size;
@@ -742,7 +741,7 @@ export class Strategy {
       return Math.min(
         targetPositionDelta,
         orderSizeInAark,
-        this.params.MAX_ORDER_USDT / midPrice
+        this.params.MAX_ORDER_USDT / midPriceUSDC
       );
     } else if (targetPositionDelta < 0) {
       orderSizeInAark = this._getArbSellAmountInAark(
@@ -756,7 +755,7 @@ export class Strategy {
       return Math.max(
         targetPositionDelta,
         orderSizeInAark,
-        -this.params.MAX_ORDER_USDT / midPrice
+        -this.params.MAX_ORDER_USDT / midPriceUSDC
       );
     } else {
       return 0;
