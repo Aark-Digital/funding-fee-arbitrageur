@@ -54,6 +54,8 @@ export class Strategy {
     );
     await this.okxService.init();
     await this.aarkService.init();
+
+    await this._fetchData();
     this._logBalanceToSlack();
     cron.schedule("0 * * * *", () => {
       this._logBalanceToSlack();
