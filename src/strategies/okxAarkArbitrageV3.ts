@@ -170,8 +170,12 @@ export class Strategy {
       ]);
       if (
         !(
+          (
           marketIndicator.targetAarkPosition === 0 &&
-          okxMarket.position!.size * okxMidUSDT <= this.params.MIN_ORDER_USDT
+            Math.abs(okxMarket.position!.size) * okxMidUSDT <=
+              this.params.MIN_ORDER_USDT &&
+            okxMarket.position!.size === orderSizeInAark
+          ) // If position to close have size lower than MIN_ORDER_USDT, close it in one trade
         ) &&
         Math.abs(orderSizeInAark) * okxMidUSDT < this.params.MIN_ORDER_USDT
       ) {
