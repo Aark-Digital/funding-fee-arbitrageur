@@ -1,6 +1,6 @@
 export interface MarketIndicator {
   crypto: string;
-  // targetAarkPositionUSDTTheo: number;
+  targetAarkPositionTheo: number;
   targetAarkPosition: number;
   aarkFundingTerm: number;
   okxFundingTerm: number;

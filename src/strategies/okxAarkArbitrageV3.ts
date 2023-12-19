@@ -560,6 +560,7 @@ export class Strategy {
         okxMarket.fundingRate!.fundingRate * (targetAarkPosition > 0 ? 1 : -1);
       marketIndicators.push({
         crypto,
+        targetAarkPositionTheo,
         targetAarkPosition,
         aarkFundingTerm,
         okxFundingTerm,
@@ -608,12 +609,12 @@ export class Strategy {
 
       targetAarkPosition =
         ((targetAarkPosition > 0 ? 1 : -1) *
-        Math.min(
+          Math.min(
             Math.max(
               maxPositionUSDT - totalAbsPositionUSDT + positionUSDTValue,
               0
             ),
-          Math.abs(targetAarkPosition) * price
+            Math.abs(targetAarkPosition) * price
           )) /
         price;
       targetAarkPosition =
@@ -622,8 +623,11 @@ export class Strategy {
       marketIndicator.targetAarkPosition = targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
 
-      totalAbsPositionUSDT +=
-        Math.abs(targetAarkPosition) * price - positionUSDTValue;
+      totalAbsPositionUSDT += Math.max(
+        0,
+        Math.abs(marketIndicator.targetAarkPositionTheo) * price -
+          positionUSDTValue
+      );
     }
 
     return targetAarkPositions;
