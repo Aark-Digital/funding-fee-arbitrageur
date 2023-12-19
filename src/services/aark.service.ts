@@ -60,6 +60,7 @@ export class AarkService {
   private symbolList: string[];
   private markets: { [symbol: string]: IAarkMarket } = {};
   private balances: undefined | Balance[];
+  private lastTradePrices: { [symbol: string]: number } = {};
   private lpPoolValue: undefined | number;
   private signer: ethers.Wallet;
   private provider: ethers.providers.AlchemyProvider =
@@ -118,6 +119,10 @@ export class AarkService {
     return this.lpPoolValue;
   }
 
+  getLastTradePrices() {
+    return this.lastTradePrices;
+  }
+
   async fetchOrderbooks() {
     throw new Error("Not Implemented");
   }
@@ -168,6 +173,17 @@ export class AarkService {
         this.markets[symbol].marketStatus = undefined;
       });
     }
+  }
+
+  async fetchLastTradePrices() {
+    const response = await this.contractReader.getPriceFeeds(
+      this.symbolList.map(
+        (symbol) => symbolIdMap[this.getFormattedSymbol(symbol)]
+      )
+    );
+    this.symbolList.forEach((symbol: string, idx: number) => {
+      this.lastTradePrices[symbol] = parseEthersBignumber(response[idx], 8);
+    });
   }
 
   async fetchUserStatus() {

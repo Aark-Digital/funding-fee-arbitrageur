@@ -358,10 +358,24 @@ export class Strategy {
       );
       throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
     }
+    const aarkMarkets = this.aarkService.getMarketInfo();
+    const aarkLastTradePrices = this.aarkService.getLastTradePrices();
+    const positionValueDelta = Object.keys(aarkMarkets).reduce(
+      (acc, symbol) => {
+        const position = aarkMarkets[symbol].position!;
+        const marketStatus = aarkMarkets[symbol].marketStatus!;
+        const indexPrice = aarkMarkets[symbol].indexPrice!;
+        const markPrice =
+          indexPrice *
+          (1 + marketStatus.skewness / marketStatus.depthFactor / 100);
+        return acc + position.size * (markPrice - aarkLastTradePrices[symbol]);
+      },
+      0
+    );
     const aarkUSDC = aarkBalance
       .filter((balance) => balance.currency === "USDC")
       .reduce((acc, balance) => acc + balance.total, 0);
-    return aarkUSDC;
+    return aarkUSDC + positionValueDelta;
   }
 
   _getOKXMidPrice(crypto: string) {
@@ -394,6 +408,10 @@ export class Strategy {
     await Promise.all([
       this.aarkService.fetchUserStatus().then(() => {
         dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+          Date.now() - timestamp;
+      }),
+      this.aarkService.fetchLastTradePrices().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchLastTradePrices"] =
           Date.now() - timestamp;
       }),
       this.aarkService.fetchMarketStatuses().then(() => {
