@@ -664,15 +664,7 @@ export class Strategy {
     const premiumEMA = this.localState.premiumEMA[crypto];
     const okxMidUSDT =
       (okxMarket.orderbook!.asks[0][0] + okxMarket.orderbook!.bids[0][0]) / 2;
-    const premium =
-      (aarkMarket.indexPrice! *
-        usdcPrice *
-        (1 +
-          aarkMarket.marketStatus!.skewness /
-            aarkMarket.marketStatus!.depthFactor /
-            100)) /
-        okxMidUSDT -
-      1;
+    const premium = (aarkMarket.indexPrice! * usdcPrice) / okxMidUSDT - 1;
     if (premiumEMA === undefined) {
       this.localState.premiumEMA[crypto] = {
         value: premium,
