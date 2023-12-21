@@ -586,6 +586,7 @@ export class Strategy {
         targetAarkPosition,
         aarkFundingTerm,
         okxFundingTerm,
+        skewnessValue: skewnessAfter * aarkMarket.indexPrice! * USDC_USDT_PRICE,
       });
     }
     marketIndicators.sort((a, b) => b.aarkFundingTerm - a.aarkFundingTerm);
