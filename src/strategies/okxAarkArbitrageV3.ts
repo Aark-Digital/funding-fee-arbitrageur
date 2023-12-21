@@ -335,8 +335,8 @@ export class Strategy {
         "BALANCE ERROR",
         `Failed to fetch OKX balance`,
         60,
-        true,
-        true
+        false,
+        false
       );
       throw new Error(`[Data Fetch Fail] Failed to fetch OKX balance Info`);
     }
@@ -353,8 +353,8 @@ export class Strategy {
         "BALANCE ERROR",
         `Failed to fetch AARK balance`,
         60,
-        true,
-        true
+        false,
+        false
       );
       throw new Error(`[Data Fetch Fail] Failed to fetch AARK balance Info`);
     }
