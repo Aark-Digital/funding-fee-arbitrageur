@@ -43,6 +43,7 @@ export class OkxSwapService {
       bids: AVLTree<number, number>;
     };
   } = {};
+  private orderbookAvailableTimestamp: number = 0;
   private monitorService: MonitorService = MonitorService.getInstance();
 
   constructor(
@@ -93,6 +94,20 @@ export class OkxSwapService {
   }
 
   private async initializeOrderbookStream() {
+    while (1) {
+      await this._initializeOrderbookStream(Date.now());
+    }
+  }
+
+  private async _initializeOrderbookStream(ts: number) {
+    this.monitorService.slackMessage(
+      "INITIALIZE ORDERBOOK STREAM",
+      "",
+      60_000,
+      false,
+      false
+    );
+    console.log(`INITIALIZE ORDERBOK STREAM at ${new Date(ts).toISOString()}`);
     const messages = stream({
       exchange: "okex-swap",
       filters: [
@@ -110,7 +125,6 @@ export class OkxSwapService {
       }
       const message = messageResponse.message;
       if (message.action === "snapshot") {
-        console.log("INITIALIZE ORDERBOK STREAM : ", message.arg.instId);
         const asks = emptyAVLTree(true);
         const bids = emptyAVLTree(false);
         for (const ask of message.data[0].asks) {
@@ -156,6 +170,11 @@ export class OkxSwapService {
         orderbook.timestamp = Number(data.ts);
         orderbook.seqId = data.seqId;
       }
+      const currentTimestamp = Date.now();
+      if (currentTimestamp - ts > 1_800_000) {
+        this.orderbookAvailableTimestamp = currentTimestamp + 10_000;
+        break;
+      }
     }
   }
 
@@ -186,6 +205,10 @@ export class OkxSwapService {
 
   getBalance() {
     return this.balances;
+  }
+
+  isOrderbookAvailable(ts: number) {
+    return this.orderbookAvailableTimestamp < ts;
   }
 
   async fetchOrderbooks() {

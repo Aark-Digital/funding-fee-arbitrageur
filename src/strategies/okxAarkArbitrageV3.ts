@@ -70,6 +70,10 @@ export class Strategy {
     const okxActionParams: IActionParam[] = [];
     const aarkActionParams: IActionParam[] = [];
 
+    if (!this.okxService.isOrderbookAvailable(Date.now())) {
+      return;
+    }
+
     if (!(await this._fetchData())) {
       return;
     }
