@@ -622,7 +622,7 @@ export class Strategy {
 
       if (
         // Avoid okx funding term
-        Math.abs(marketIndicator.okxFundingTerm) <
+        marketIndicator.okxFundingTerm <
           -this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD &&
         okxMarket.fundingRate!.fundingTime - Date.now() < ONE_HOUR_IN_MS
       ) {
