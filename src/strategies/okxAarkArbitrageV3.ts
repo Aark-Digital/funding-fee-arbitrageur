@@ -395,8 +395,8 @@ export class Strategy {
     this.monitorService.slackMessage(
       "BALANCE INFO",
       JSON.stringify({
-        "AARK USDC Balance": okx.toFixed(2),
-        "OKX USDT Balance": aark.toFixed(2),
+        "AARK USDC Balance": aark.toFixed(2),
+        "OKX USDT Balance": okx.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
         "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
       }),
