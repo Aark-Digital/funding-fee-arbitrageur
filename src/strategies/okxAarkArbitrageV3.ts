@@ -268,6 +268,7 @@ export class Strategy {
       UNHEDGED_THRESHOLD_USDT,
       BASE_PRICE_DIFF_THRESHOLD,
       OKX_FUNDING_RATE_DODGE_THRESHOLD,
+      ENTER_SKEWNESS_RATIO,
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
@@ -288,6 +289,7 @@ export class Strategy {
       process.env.UNHEDGED_THRESHOLD_USDT!,
       process.env.BASE_PRICE_DIFF_THRESHOLD!,
       process.env.OKX_FUNDING_RATE_DODGE_THRESHOLD!,
+      process.env.ENTER_SKEWNESS_RATIO!,
 
       process.env.MAX_LEVERAGE!,
       process.env.MAX_ORDER_USDT!,
@@ -314,6 +316,7 @@ export class Strategy {
       UNHEDGED_THRESHOLD_USDT,
       BASE_PRICE_DIFF_THRESHOLD,
       OKX_FUNDING_RATE_DODGE_THRESHOLD,
+      ENTER_SKEWNESS_RATIO,
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
@@ -568,7 +571,8 @@ export class Strategy {
       const aarkStatus = aarkMarket.marketStatus!;
 
       const targetAarkPositionTheo =
-        -(aarkStatus.skewness - aarkMarket.position!.size) / 3;
+        -(aarkStatus.skewness - aarkMarket.position!.size) *
+        this.params.ENTER_SKEWNESS_RATIO;
       let targetAarkPosition = targetAarkPositionTheo;
       const skewnessAfter =
         aarkStatus.skewness - aarkMarket.position!.size + targetAarkPosition;
