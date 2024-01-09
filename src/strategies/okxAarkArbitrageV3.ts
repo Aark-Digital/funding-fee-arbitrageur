@@ -272,6 +272,7 @@ export class Strategy {
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_ORDERBOOK_SLIPPAGE,
       MAX_TOTAL_POSITION_USDT,
 
       MIN_ORDER_USDT,
@@ -293,6 +294,7 @@ export class Strategy {
 
       process.env.MAX_LEVERAGE!,
       process.env.MAX_ORDER_USDT!,
+      process.env.MAX_ORDERBOOK_SLIPPAGE!,
       process.env.MAX_TOTAL_POSITION_USDT!,
 
       process.env.MIN_ORDER_USDT!,
@@ -320,6 +322,7 @@ export class Strategy {
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_ORDERBOOK_SLIPPAGE,
       MAX_TOTAL_POSITION_USDT,
 
       MIN_ORDER_USDT,
@@ -747,9 +750,14 @@ export class Strategy {
     const depthFactor = aarkMarketStatus.depthFactor;
     const skewness = aarkMarketStatus.skewness;
 
+    const bestPrice = okxOrderbook.bids[0][0];
+
     // Aark Buy
     let orderSizeInAark = 0;
     for (const [p, q] of okxOrderbook.bids) {
+      if (p < bestPrice * (1 - this.params.MAX_ORDERBOOK_SLIPPAGE)) {
+        break;
+      }
       const deltaAmount = Math.min(
         q * okxMarketInfo.contractSize,
         2 *
@@ -781,8 +789,13 @@ export class Strategy {
     const depthFactor = aarkMarketStatus.depthFactor;
     const skewness = aarkMarketStatus.skewness;
 
+    const bestPrice = okxOrderbook.asks[0][0];
+
     let orderSizeInAark = 0;
     for (const [p, q] of okxOrderbook.asks) {
+      if (p > bestPrice * (1 + this.params.MAX_ORDERBOOK_SLIPPAGE)) {
+        break;
+      }
       const deltaAmount = Math.min(
         q * okxMarketInfo.contractSize,
         -2 *
