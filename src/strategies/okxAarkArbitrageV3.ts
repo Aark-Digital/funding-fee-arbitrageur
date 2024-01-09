@@ -265,10 +265,12 @@ export class Strategy {
   _readEnvParams() {
     const [
       EMA_WINDOW,
+      ENTER_SKEWNESS_RATIO,
       UNHEDGED_THRESHOLD_USDT,
       BASE_PRICE_DIFF_THRESHOLD,
       OKX_FUNDING_RATE_DODGE_THRESHOLD,
-      ENTER_SKEWNESS_RATIO,
+      OPEN_AARK_FUNDING_TERM_THRESHOLD,
+      CLOSE_AARK_FUNDING_TERM_THRESHOLD,
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
@@ -277,7 +279,6 @@ export class Strategy {
 
       MIN_ORDER_USDT,
       MIN_ORDER_INTERVAL_MS,
-      MIN_AARK_FUNDING_TERM,
 
       INITIAL_BALANCE_USDT,
       BALANCE_RATIO_IN_OKX,
@@ -287,10 +288,12 @@ export class Strategy {
       DATA_FETCH_TIME_THRESHOLD_MS,
     ] = [
       process.env.EMA_WINDOW!,
+      process.env.ENTER_SKEWNESS_RATIO!,
       process.env.UNHEDGED_THRESHOLD_USDT!,
       process.env.BASE_PRICE_DIFF_THRESHOLD!,
       process.env.OKX_FUNDING_RATE_DODGE_THRESHOLD!,
-      process.env.ENTER_SKEWNESS_RATIO!,
+      process.env.OPEN_AARK_FUNDING_TERM_THRESHOLD!,
+      process.env.CLOSE_AARK_FUNDING_TERM_THRESHOLD!,
 
       process.env.MAX_LEVERAGE!,
       process.env.MAX_ORDER_USDT!,
@@ -299,7 +302,6 @@ export class Strategy {
 
       process.env.MIN_ORDER_USDT!,
       process.env.MIN_ORDER_INTERVAL_MS!,
-      process.env.MIN_AARK_FUNDING_TERM!,
 
       process.env.INITIAL_BALANCE_USDT!,
       process.env.BALANCE_RATIO_IN_OKX!,
@@ -315,10 +317,12 @@ export class Strategy {
       TARGET_CRYPTO_LIST,
 
       EMA_WINDOW,
+      ENTER_SKEWNESS_RATIO,
       UNHEDGED_THRESHOLD_USDT,
       BASE_PRICE_DIFF_THRESHOLD,
       OKX_FUNDING_RATE_DODGE_THRESHOLD,
-      ENTER_SKEWNESS_RATIO,
+      OPEN_AARK_FUNDING_TERM_THRESHOLD,
+      CLOSE_AARK_FUNDING_TERM_THRESHOLD,
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
@@ -327,7 +331,6 @@ export class Strategy {
 
       MIN_ORDER_USDT,
       MIN_ORDER_INTERVAL_MS,
-      MIN_AARK_FUNDING_TERM,
 
       INITIAL_BALANCE_USDT,
       BALANCE_RATIO_IN_OKX,
@@ -627,17 +630,27 @@ export class Strategy {
       const positionUSDTValue = Math.abs(okxMarket.position!.size) * price;
       let targetAarkPosition = marketIndicator.targetAarkPosition;
 
-      if (
-        // Avoid okx funding term
-        marketIndicator.okxFundingTerm <
-          -this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD &&
-        okxMarket.fundingRate!.fundingTime - Date.now() < ONE_HOUR_IN_MS
-      ) {
+      const dodgeOKXFunding = (threshold: number) =>
+        marketIndicator.okxFundingTerm < threshold &&
+        okxMarket.fundingRate!.fundingTime - Date.now() < ONE_HOUR_IN_MS;
+
+      if (dodgeOKXFunding(-this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD)) {
+        // Close position when impend to pay huge okx funding fee
         targetAarkPosition = 0;
       } else if (
         // Do not enter position if expected aark profit is too low
-        marketIndicator.aarkFundingTerm < this.params.MIN_AARK_FUNDING_TERM
+        positionUSDTValue === 0 &&
+        marketIndicator.aarkFundingTerm <
+          this.params.OPEN_AARK_FUNDING_TERM_THRESHOLD
       ) {
+        targetAarkPosition = 0;
+      } else if (
+        positionUSDTValue !== 0 &&
+        (marketIndicator.aarkFundingTerm <
+          this.params.CLOSE_AARK_FUNDING_TERM_THRESHOLD ||
+          dodgeOKXFunding(0))
+      ) {
+        // Do not close posiion until aark funding term is too low or impend to pay okx funding fee
         targetAarkPosition = 0;
       }
 
@@ -659,7 +672,11 @@ export class Strategy {
 
       totalAbsPositionUSDT += Math.max(
         0,
-        Math.abs(marketIndicator.targetAarkPositionTheo) * price -
+        (Math.abs(marketIndicator.targetAarkPositionTheo) >
+        this.params.MIN_ORDER_USDT
+          ? Math.abs(marketIndicator.targetAarkPositionTheo)
+          : 0) *
+          price -
           positionUSDTValue
       );
     }
