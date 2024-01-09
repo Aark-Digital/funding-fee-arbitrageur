@@ -56,7 +56,7 @@ export class MonitorService {
     if (call) {
       this._twilioCall();
     }
-    await axios.post(this.slackParam.url, { text });
+    await axios.post(this.slackParam.url, { text }, { timeout: 5000 });
     this._setLastSlackMessage(topic, timestamp);
   }
 

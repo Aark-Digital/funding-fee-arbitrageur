@@ -441,6 +441,7 @@ export class OkxSwapService {
   ) {
     const response = await axios.get(this.baseUrl + endPoint, {
       params,
+      timeout: 5000,
     });
     return response.data;
   }
@@ -473,6 +474,7 @@ export class OkxSwapService {
       this.baseUrl + endPoint + "?" + new URLSearchParams(params).toString(),
       {
         headers,
+        timeout: 5000,
       }
     );
     return response.data;
@@ -499,6 +501,7 @@ export class OkxSwapService {
     };
     const response = await axios.post(this.baseUrl + endPoint, params, {
       headers,
+      timeout: 5000,
     });
     return response.data;
   }

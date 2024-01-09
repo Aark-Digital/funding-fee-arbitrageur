@@ -63,11 +63,11 @@ export class AarkService {
   private lastTradePrices: { [symbol: string]: number } = {};
   private lpPoolValue: undefined | number;
   private signer: ethers.Wallet;
-  private provider: ethers.providers.AlchemyProvider =
-    new ethers.providers.AlchemyProvider(
-      "arbitrum",
-      process.env.ALCHEMY_API_KEY!
-    );
+  private provider: ethers.providers.JsonRpcProvider =
+    new ethers.providers.JsonRpcProvider({
+      url: `https://arb-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+      timeout: 5000,
+    });
   private indexPriceUrl: string = process.env.AARK_INDEX_PRICE_URL!;
 
   constructor(signerPk: string, symbolList: string[]) {
@@ -139,6 +139,7 @@ export class AarkService {
             .map((symbol: string) => this.getFormattedSymbol(symbol))
             .join(","),
         },
+        timeout: 5000,
       });
       this.symbolList.forEach((symbol: string, idx: number) => {
         this.markets[symbol].indexPrice = priceResponse.data[idx].indexPrice;
@@ -344,6 +345,7 @@ export class OctService {
         headers: {
           signature: signature,
         },
+        timeout: 5000,
       }
     );
   }
