@@ -646,9 +646,9 @@ export class Strategy {
         targetAarkPosition = 0;
       } else if (
         positionUSDTValue !== 0 &&
-        (marketIndicator.aarkFundingTerm <
-          this.params.CLOSE_AARK_FUNDING_TERM_THRESHOLD ||
-          dodgeOKXFunding(0))
+        marketIndicator.aarkFundingTerm <
+          this.params.CLOSE_AARK_FUNDING_TERM_THRESHOLD &&
+        dodgeOKXFunding(0)
       ) {
         // Do not close posiion until aark funding term is too low or impend to pay okx funding fee
         targetAarkPosition = 0;
