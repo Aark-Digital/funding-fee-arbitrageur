@@ -672,7 +672,7 @@ export class Strategy {
 
       totalAbsPositionUSDT += Math.max(
         0,
-        (Math.abs(marketIndicator.targetAarkPositionTheo) >
+        (Math.abs(marketIndicator.targetAarkPositionTheo) * price >
         this.params.MIN_ORDER_USDT
           ? Math.abs(marketIndicator.targetAarkPositionTheo)
           : 0) *
