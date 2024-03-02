@@ -281,6 +281,7 @@ export class Strategy {
       MIN_ORDER_INTERVAL_MS,
 
       INITIAL_BALANCE_USDT,
+      LOSS_THRESHOLD,
       BALANCE_RATIO_IN_OKX,
       BALANCE_RATIO_IN_AARK,
       BALANCE_RATIO_DIFF_THRESHOLD,
@@ -304,6 +305,7 @@ export class Strategy {
       process.env.MIN_ORDER_INTERVAL_MS!,
 
       process.env.INITIAL_BALANCE_USDT!,
+      process.env.LOSS_THRESHOLD!,
       process.env.BALANCE_RATIO_IN_OKX!,
       process.env.BALANCE_RATIO_IN_AARK!,
       process.env.BALANCE_RATIO_DIFF_THRESHOLD!,
@@ -333,6 +335,7 @@ export class Strategy {
       MIN_ORDER_INTERVAL_MS,
 
       INITIAL_BALANCE_USDT,
+      LOSS_THRESHOLD,
       BALANCE_RATIO_IN_OKX,
       BALANCE_RATIO_IN_AARK,
       BALANCE_RATIO_DIFF_THRESHOLD,
@@ -499,7 +502,7 @@ export class Strategy {
     );
     if (
       okxBalanceUSDT + aarkBalanceUSDC <
-      this.params.INITIAL_BALANCE_USDT * 0.95
+      this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
       this.monitorService.slackMessage(
         "TOTAL BALANCE TOO LOW",

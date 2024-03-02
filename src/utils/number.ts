@@ -14,7 +14,7 @@ export function round_dp(n: number, d: number) {
 }
 
 export function formatNumber(n: number, d: number) {
-  return n.toFixed(d);
+  return n.toLocaleString("en-US", { maximumFractionDigits: d });
 }
 
 export function numberToPrecision(f: number) {
