@@ -41,6 +41,16 @@ const symbolIdMap: { [symbol: string]: number } = {
   FIL: 19,
   NEAR: 20,
   DYDX: 21,
+  OP: 37,
+  ORDI: 38,
+  SUI: 39,
+  TIA: 40,
+  APT: 41,
+  INJ: 42,
+  SEI: 43,
+  BLUR: 44,
+  MANTA: 45,
+  ID: 46,
 };
 
 const collateralAddressMap: { [symbol: string]: string } = {
