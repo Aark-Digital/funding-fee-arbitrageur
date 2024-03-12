@@ -619,12 +619,7 @@ export class Strategy {
           timestamp
       ) {
         targetAarkPositionTheo =
-          aarkMarket.position!.size -
-          aarkStatus.skewness +
-          ((aarkStatus.skewness > 0 ? 1 : -1) *
-            marketParam.skenessUSDTThreshold) /
-            aarkMarket.indexPrice! /
-            2;
+          aarkMarket.position!.size - aarkStatus.skewness;
       } else {
         targetAarkPositionTheo = aarkMarket.position!.size;
       }
