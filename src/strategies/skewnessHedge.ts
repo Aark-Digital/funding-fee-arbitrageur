@@ -917,7 +917,7 @@ export class Strategy {
         });
       }
     }
-    console.log(overSkewedMarkets);
+    console.log(JSON.stringify(overSkewedMarkets));
     if (overSkewedMarkets.length > 0) {
       this.monitorService.slackMessage(
         `Over Skewed Markets`,
