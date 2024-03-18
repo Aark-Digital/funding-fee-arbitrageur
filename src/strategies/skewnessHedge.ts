@@ -983,6 +983,10 @@ export class Strategy {
     const arbitrageur = this.aarkService.getSigner();
 
     if (withdrawAmount === 0) {
+      this.localState.rebalanceState = {
+        state: RebalanceState.NONE,
+        timestamp,
+      };
       return true;
     }
 
@@ -1139,6 +1143,10 @@ export class Strategy {
     );
 
     if (withdrawAmount === 0) {
+      this.localState.rebalanceState = {
+        state: RebalanceState.NONE,
+        timestamp,
+      };
       return true;
     }
 
