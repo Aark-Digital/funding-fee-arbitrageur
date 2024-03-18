@@ -35,3 +35,11 @@ export interface IActionParam {
   order: ILimitOrderParam | IMarketOrderParam | ICancelOrderParam;
   type: ActionType;
 }
+
+export interface ITransferParam {
+  currency: string;
+  amount: number;
+  toAddress: string;
+  fee: number;
+  chain: string;
+}

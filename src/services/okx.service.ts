@@ -13,6 +13,7 @@ import {
   convertSizeToContractAmount,
   floor_dp,
   numberToPrecision,
+  round_dp,
 } from "../utils/number";
 import { Balance } from "../interfaces/basic-interface";
 import { stream } from "tardis-dev";
@@ -345,6 +346,13 @@ export class OkxSwapService {
     }
   }
 
+  async fetchFundingBalance(symbol: string) {
+    const result = await this._privateGet("/api/v5/asset/balances", {
+      symbol,
+    });
+    return result.data[0];
+  }
+
   async fetchFundingRate(): Promise<void> {
     const timestamp = new Date().getTime();
     try {
@@ -370,6 +378,66 @@ export class OkxSwapService {
         this.markets[symbol].fundingRate = undefined;
       }
     }
+  }
+
+  async fetchCurrencyInfo() {
+    const result = await this._privateGet("/api/v5/asset/currencies", {});
+    return result.data;
+  }
+
+  async withdrawAssset(currency: string, amount: number, toAddress: string) {
+    if (!["USDT"].includes(currency)) {
+      throw new Error(`Unexpected currency to withdraw : ${currency}`);
+    }
+
+    const totalCurrencyInfo = await this.fetchCurrencyInfo();
+    const chain = `${currency}-Arbitrum One`;
+    const currencyInfo = totalCurrencyInfo.find(
+      (info: any) => info.chain === chain
+    )!;
+    const fee = currencyInfo.minFee;
+    console.log();
+
+    const response = await this._post("/api/v5/asset/withdrawal", {
+      ccy: currency,
+      amt: floor_dp(amount - fee, 6).toString(),
+      dest: "4",
+      toAddr: toAddress,
+      fee,
+      chain,
+      walletType: "private",
+    });
+    console.log("withdrawAsset", JSON.stringify(response));
+    return response.data[0];
+  }
+
+  async fetchWithdrawState(wdId: string) {
+    const response = await this._privateGet(
+      "/api/v5/asset/deposit-withdraw-status",
+      {
+        wdId,
+      }
+    );
+    return response.data[0];
+  }
+
+  async transferAsset(currency: string, amount: number, fromTrading: boolean) {
+    const response = await this._post("/api/v5/asset/transfer", {
+      type: "0",
+      ccy: currency,
+      amt: round_dp(amount, 4).toString(),
+      from: fromTrading ? "18" : "6",
+      to: fromTrading ? "6" : "18",
+    });
+    console.log("transferAsset", JSON.stringify(response));
+    return response.data[0];
+  }
+
+  async fetchTransferState(transId: string) {
+    const response = await this._privateGet("/api/v5/asset/transfer-state", {
+      transId,
+    });
+    return response.data[0];
   }
 
   // TODO: Is there better way to do this??

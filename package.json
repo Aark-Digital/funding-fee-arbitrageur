@@ -11,6 +11,9 @@
   "license": "ISC",
   "dependencies": {
     "@types/lodash": "^4.14.202",
+    "@uniswap/sdk-core": "^4.2.0",
+    "@uniswap/smart-order-router": "^3.25.1",
+    "@uniswap/v3-sdk": "^3.11.0",
     "avl": "^1.5.3",
     "axios": "^1.6.0",
     "bignumber.js": "^9.1.2",
