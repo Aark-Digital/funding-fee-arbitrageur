@@ -3,6 +3,7 @@ import BigNumber from "bignumber.js";
 import { abi as ContractReader } from "../abis/ContractReader.json";
 import { abi as OctRouterABI } from "../abis/OctRouter.json";
 import { abi as LpManager } from "../abis/LpManager.json";
+import { abi as MasterRouter } from "../abis/MasterRouter.json";
 import { contractAddressMap } from "../constants/contract-address";
 import { IAarkMarket } from "../interfaces/market-interface";
 import {
@@ -13,10 +14,8 @@ import {
   IMarketOrderParam,
   Side,
 } from "../interfaces/order-interface";
-import Prando from "prando";
 import axios from "axios";
 import { sleep } from "../utils/time";
-import { MonitorService } from "./monitor.service";
 import { Balance } from "../interfaces/basic-interface";
 import { parseEthersBignumber } from "../utils/number";
 
@@ -67,6 +66,7 @@ export class AarkService {
   private octService: OctService;
   private contractReader: ethers.Contract;
   private lpManager: ethers.Contract;
+  private masterRouter: ethers.Contract;
   private symbolList: string[];
   private markets: { [symbol: string]: IAarkMarket } = {};
   private balances: undefined | Balance[];
@@ -93,6 +93,11 @@ export class AarkService {
       LpManager,
       this.signer
     );
+    this.masterRouter = new ethers.Contract(
+      contractAddressMap["router"],
+      MasterRouter,
+      this.signer
+    );
     this.symbolList.forEach((symbol) => {
       this.markets[symbol] = {
         orderbook: undefined,
@@ -110,6 +115,13 @@ export class AarkService {
 
   async init() {
     await this.octService.init();
+  }
+
+  getSigner() {
+    return this.signer;
+  }
+  getArbitrageurAddress() {
+    return this.signer.address;
   }
 
   getFormattedSymbol(symbol: string) {
@@ -246,6 +258,32 @@ export class AarkService {
   async fetchLpPoolValue() {
     const lpPoolValue = await this.lpManager.getLpPoolValue();
     this.lpPoolValue = parseEthersBignumber(lpPoolValue, 18);
+  }
+
+  async withdrawUSDC(amount: number): Promise<boolean> {
+    const tokenAmount = Math.floor(amount * 1e6);
+    const usdcAddress = contractAddressMap["USDC"];
+    const tx = await this.masterRouter.removeCollateral(
+      this.signer.address,
+      usdcAddress,
+      tokenAmount,
+      false
+    );
+    await tx.wait();
+    return true;
+  }
+
+  async depositUSDC(amount: number): Promise<boolean> {
+    const tokenAmount = Math.floor(amount * 1e6);
+    const usdcAddress = contractAddressMap["USDC"];
+    const tx = await this.masterRouter.addCollateral(
+      this.signer.address,
+      usdcAddress,
+      tokenAmount,
+      false
+    );
+    await tx.wait();
+    return true;
   }
 
   async executeOrders(actionParams: IActionParam[]) {

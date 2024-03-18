@@ -1,7 +1,11 @@
 export const contractAddressMap: { [key: string]: string } = {
   futuresManager: "0xF45f2903438d383769CA3E80356c167e9D9aF1AD",
   lpManager: "0xa5bEe7b46b456bd1268c35959A0e1c82f29145E2",
+  router: "0x85BBe848e12472EB1beE06bE7e123Bdee42c7943",
   priceOracle: "0xbCdb9B040abF11D561b20c78E38130A8FfEB0364",
   contractReader: "0x0A2e171DB1748Cab3F1549Cf12096546374346ac",
   octRouter: "0x4213d42A5A6Bd38Ef9A166b179D1f360FF536D39",
+  vault: "0x7a5df878e195d09f1c0bbba702cfdf0ac9d0a835",
+  USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
 };
