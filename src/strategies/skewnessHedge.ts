@@ -127,8 +127,6 @@ export class Strategy {
       return;
     }
 
-    this._checkBalance();
-
     if (!this.okxService.isOrderbookAvailable(Date.now())) {
       return;
     }
@@ -139,6 +137,8 @@ export class Strategy {
     if (!(await this._fetchPriceData())) {
       return;
     }
+
+    this._checkBalance();
 
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
