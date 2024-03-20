@@ -23,10 +23,10 @@ interface MarketIndicator {
 }
 
 enum RebalanceState {
-  NONE = 1,
-  OKX_TO_AARK,
-  AARK_TO_OKX,
-  HALT,
+  NONE = "None",
+  OKX_TO_AARK = "OKX to AARk",
+  AARK_TO_OKX = "AARK to OKX",
+  HALT = "HALT",
 }
 
 interface SkewnessInfo {
@@ -458,6 +458,7 @@ export class Strategy {
         "OKX USDT Balance": okx.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
         "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
+        "Rebalance State": this.localState.rebalanceState.state,
       }),
       60_000,
       false,
@@ -559,6 +560,7 @@ export class Strategy {
           okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
           2
         ),
+        rebalanceState: this.localState.rebalanceState.state,
       })
     );
     if (
@@ -971,6 +973,17 @@ export class Strategy {
     // 3. Deposit USDC to Aark futures account
 
     const timestamp = Date.now();
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from OKX to AARK started : ${JSON.stringify({
+        startTime: new Date().toISOString(),
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
     const aarkUSDC = this._getAarkUSDCBalance();
     const okxUSDT = this._getOkxUSDTBalance();
     const withdrawAmount = round_dp(
@@ -1124,6 +1137,17 @@ export class Strategy {
       state: RebalanceState.NONE,
       timestamp,
     };
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from OKX to AARK finished : ${JSON.stringify({
+        endTime: new Date().toISOString(),
+        elapsedTimeMs: Date.now() - timestamp,
+      })}`,
+      60_000,
+      false,
+      false
+    );
     return true;
   }
 
@@ -1132,6 +1156,17 @@ export class Strategy {
     // 2. Convert USDC to USDT
     // 3. Send converted USDT to given OKX deposit address.
     const timestamp = Date.now();
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from OKX to AARK started : ${JSON.stringify({
+        startTime: new Date().toISOString(),
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
     const aarkUSDC = this._getAarkUSDCBalance();
     const okxUSDT = this._getOkxUSDTBalance();
     const withdrawAmount = round_dp(
@@ -1253,7 +1288,18 @@ export class Strategy {
       state: RebalanceState.NONE,
       timestamp,
     };
-    // return true;
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from AARK to OKX finished : ${JSON.stringify({
+        endTime: new Date().toISOString(),
+        elapsedTimeMs: Date.now() - timestamp,
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
     return true;
   }
 }
