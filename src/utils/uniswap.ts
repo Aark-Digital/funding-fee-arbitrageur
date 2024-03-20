@@ -276,9 +276,7 @@ export async function uniswapArbitrum(
   );
   // suggested gas price (increase if you want faster execution)
   console.log("5-3. Estimate gasPrice");
-  approveTxUnsigned.gasPrice = await provider
-    .getGasPrice()
-    .then((value) => value.mul(1.5));
+  approveTxUnsigned.gasPrice = await provider.getGasPrice();
   // nonce is the same as number previous transactions
   console.log("5-4. Get Nonce");
   approveTxUnsigned.nonce = await provider.getTransactionCount(walletAddress);
