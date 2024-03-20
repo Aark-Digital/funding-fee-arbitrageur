@@ -261,6 +261,7 @@ export async function uniswapArbitrum(
   // For Metamask it will be just "await contractIn.approve(V3_SWAP_ROUTER_ADDRESS, amountIn);"
 
   // here we just create a transaction object (not sending it to blockchain).
+  console.log("5-1. Get approveTxUnsigned");
   const approveTxUnsigned = await contractIn.populateTransaction.approve(
     V3_SWAP_ROUTER_ADDRESS,
     amountIn
@@ -268,27 +269,32 @@ export async function uniswapArbitrum(
   // by default chainid is not set https://ethereum.stackexchange.com/questions/94412/valueerror-code-32000-message-only-replay-protected-eip-155-transac
   approveTxUnsigned.chainId = chainId;
   // estimate gas required to make approve call (not sending it to blockchain either)
+  console.log("5-2. Estimate gasLimit");
   approveTxUnsigned.gasLimit = await contractIn.estimateGas.approve(
     V3_SWAP_ROUTER_ADDRESS,
     amountIn
   );
   // suggested gas price (increase if you want faster execution)
+  console.log("5-3. Estimate gasPrice");
   approveTxUnsigned.gasPrice = await provider
     .getGasPrice()
     .then((value) => value.mul(1.5));
   // nonce is the same as number previous transactions
+  console.log("5-4. Get Nonce");
   approveTxUnsigned.nonce = await provider.getTransactionCount(walletAddress);
 
   // sign transaction by our signer
+  console.log("5-5. Get TxSigned");
   const approveTxSigned = await signer.signTransaction(approveTxUnsigned);
   // submit transaction to blockchain
+  console.log("5-6. Send Transaction");
   const submittedTx = await provider.sendTransaction(approveTxSigned);
   // wait till transaction completes
   const approveReceipt = await submittedTx.wait();
   if (approveReceipt.status === 0)
     throw new Error("Approve transaction failed");
 
-  console.log("Making a swap...");
+  console.log("6. Making a swap...");
   const value = BigNumber.from(route.methodParameters.value);
 
   const transaction = {
@@ -301,7 +307,7 @@ export async function uniswapArbitrum(
     // route.estimatedGasUsed might be too low!
     // most of swaps I tested fit into 300,000 but for some complex swaps this gas is not enough.
     // Loot at etherscan/polygonscan past results.
-    gasLimit: BigNumber.from("800000"),
+    gasLimit: BigNumber.from("1000000"),
   };
 
   var tx = await signer.sendTransaction(transaction);
