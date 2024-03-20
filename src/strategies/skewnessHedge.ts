@@ -975,7 +975,7 @@ export class Strategy {
     const timestamp = Date.now();
 
     this.monitorService.slackMessage(
-      `REBALANCE FINISHED`,
+      `REBALANCE START`,
       `Rebalance from OKX to AARK started : ${JSON.stringify({
         startTime: new Date().toISOString(),
       })}`,
@@ -1158,7 +1158,7 @@ export class Strategy {
     const timestamp = Date.now();
 
     this.monitorService.slackMessage(
-      `REBALANCE FINISHED`,
+      `REBALANCE START`,
       `Rebalance from OKX to AARK started : ${JSON.stringify({
         startTime: new Date().toISOString(),
       })}`,
