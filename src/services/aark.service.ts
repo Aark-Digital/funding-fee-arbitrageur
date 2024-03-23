@@ -16,7 +16,7 @@ import {
 } from "../interfaces/order-interface";
 import axios from "axios";
 import { sleep } from "../utils/time";
-import { Balance } from "../interfaces/basic-interface";
+import { Balance, Position } from "../interfaces/basic-interface";
 import { parseEthersBignumber } from "../utils/number";
 
 const symbolIdMap: { [symbol: string]: number } = {
@@ -209,14 +209,14 @@ export class AarkService {
     });
   }
 
-  async fetchUserStatus() {
+  async _fetchAddressStatus(
+    address: string
+  ): Promise<[undefined | Balance[], undefined | Position[]]> {
     const timestamp = Date.now();
     try {
-      const response = await this.contractReader.getUserFuturesStatus(
-        this.signer.address
-      );
+      const response = await this.contractReader.getUserFuturesStatus(address);
 
-      this.balances = response.collaterals
+      const balances: Balance[] = response.collaterals
         .filter(
           (col: any) =>
             col.tokenAddress != "0x0000000000000000000000000000000000000000"
@@ -236,23 +236,43 @@ export class AarkService {
           },
         ]);
 
-      this.symbolList.forEach((symbol, idx) => {
+      const positions: Position[] = [];
+
+      this.symbolList.forEach((symbol) => {
         const position =
           response.positions[symbolIdMap[this.getFormattedSymbol(symbol)]];
-        this.markets[symbol].position = {
+        positions.push({
           timestamp,
           symbol,
           price: parseEthersBignumber(position.entryPrice, 8),
           size: parseEthersBignumber(position.qty, 10),
-        };
+        });
       });
+      return [balances, positions];
     } catch (e) {
-      console.log(`[Aark Service] Failed to fetch user status: ${e}`);
+      console.log(`[Aark Service] Failed to fetch address status: ${e}`);
       this.symbolList.forEach((symbol: string) => {
         this.markets[symbol].position = undefined;
       });
       this.balances = undefined;
+      return [undefined, undefined];
     }
+  }
+
+  async fetchSignerStatus() {
+    const [balances, positions] = await this._fetchAddressStatus(
+      this.signer.address
+    );
+
+    this.balances = balances;
+    Object.keys(this.markets).forEach((symbol: string) => {
+      if (positions !== undefined) {
+        const position = positions.find((pos) => pos.symbol === symbol)!;
+        this.markets[symbol].position = position;
+      } else {
+        this.markets[symbol].position = undefined;
+      }
+    });
   }
 
   async fetchLpPoolValue() {

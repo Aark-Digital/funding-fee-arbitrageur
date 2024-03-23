@@ -175,7 +175,7 @@ export class Strategy {
       if (
         !(
           (
-          marketIndicator.targetAarkPosition === 0 &&
+            marketIndicator.targetAarkPosition === 0 &&
             Math.abs(okxMarket.position!.size) * okxMidUSDT <=
               this.params.MIN_ORDER_USDT &&
             okxMarket.position!.size === orderSizeInAark
@@ -422,8 +422,8 @@ export class Strategy {
     const timestamp = Date.now();
     const dataFetchLatencyInfo: { [key: string]: number } = {};
     await Promise.all([
-      this.aarkService.fetchUserStatus().then(() => {
-        dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+      this.aarkService.fetchSignerStatus().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchSignerStatus"] =
           Date.now() - timestamp;
       }),
       this.aarkService.fetchLastTradePrices().then(() => {

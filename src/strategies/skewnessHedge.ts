@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import cron from "node-cron";
-import { Orderbook } from "../interfaces/basic-interface";
+import { Balance, Orderbook, Position } from "../interfaces/basic-interface";
 import { IAarkMarket, IMarket } from "../interfaces/market-interface";
 import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
@@ -50,6 +50,14 @@ export class Strategy {
     skewnessInfo: {} as {
       [key: string]: SkewnessInfo;
     },
+    blackListInfo: {} as {
+      [address: string]: {
+        timestamp: number;
+        priority: number;
+        balance: undefined | Balance[];
+        position: undefined | Position[];
+      };
+    },
   };
 
   constructor() {
@@ -75,6 +83,8 @@ export class Strategy {
 
     await this._fetchData();
     await this._fetchPriceData();
+
+    await this._updateBlackListInfo();
 
     const aarkMarkets = this.aarkService.getMarketInfo();
 
@@ -137,6 +147,8 @@ export class Strategy {
     if (!(await this._fetchPriceData())) {
       return;
     }
+
+    await this._updateBlackListInfo();
 
     this._checkBalance();
 
@@ -362,11 +374,13 @@ export class Strategy {
       process.env.DATA_FETCH_TIME_THRESHOLD_MS!,
     ].map((param: string) => parseFloat(param));
 
+    const BLACK_LIST = JSON.parse(process.env.BLACK_LIST!);
     const TARGET_CRYPTO_LIST = JSON.parse(process.env.TARGET_CRYPTO_LIST!);
     const MARKET_PARAMS = JSON.parse(process.env.MARKET_PARAMS!);
     const OKX_DEPOSIT_ADDRESS = process.env.OKX_DEPOSIT_ADDRESS!;
 
     this.params = {
+      BLACK_LIST,
       TARGET_CRYPTO_LIST,
       MARKET_PARAMS,
 
@@ -389,6 +403,28 @@ export class Strategy {
 
       DATA_FETCH_TIME_THRESHOLD_MS,
     };
+  }
+
+  async _updateBlackListInfo() {
+    const timestamp = Date.now();
+    const blackListInfo: [undefined | Balance[], undefined | Position[]][] =
+      await Promise.all(
+        this.params.BLACK_LIST.map((address: string) =>
+          this.aarkService._fetchAddressStatus(address)
+        )
+      );
+
+    (this.params.BLACK_LIST as string[]).forEach(
+      (address: string, i: number) => {
+        const [balance, position] = blackListInfo[i];
+        this.localState.blackListInfo[address] = {
+          timestamp,
+          priority: i,
+          balance,
+          position,
+        };
+      }
+    );
   }
 
   _getOkxUSDTBalance() {
@@ -484,8 +520,8 @@ export class Strategy {
     const timestamp = Date.now();
     const dataFetchLatencyInfo: { [key: string]: number } = {};
     await Promise.all([
-      this.aarkService.fetchUserStatus().then(() => {
-        dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+      this.aarkService.fetchSignerStatus().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchSignerStatus"] =
           Date.now() - timestamp;
       }),
       this.aarkService.fetchLastTradePrices().then(() => {
@@ -635,8 +671,32 @@ export class Strategy {
 
     const marketParams = this.params.MARKET_PARAMS;
 
+    const blackListPositionMap: { [crypto: string]: Position } = {};
+
     for (const crypto of this.params.TARGET_CRYPTO_LIST as string[]) {
       let targetAarkPositionTheo = 0;
+      let blackListHasPosition = false;
+
+      if (crypto !== "BTC") {
+        for (const blackList of this.params.BLACK_LIST) {
+          const info = this.localState.blackListInfo[blackList];
+          if (info.position === undefined) {
+            continue;
+          }
+          const position = info.position.find(
+            (pos) => pos.symbol === `${crypto}_USDC`
+          );
+          if (position === undefined) {
+            continue;
+          }
+          if (position.size !== 0) {
+            blackListHasPosition = true;
+            blackListPositionMap[crypto] = position;
+            break;
+          }
+        }
+      }
+
       const okxMarket = okxMarkets[`${crypto}_USDT`];
       const aarkMarket = aarkMarkets[`${crypto}_USDC`];
 
@@ -654,7 +714,10 @@ export class Strategy {
         }
       }
 
-      if (
+      if (blackListHasPosition) {
+        targetAarkPositionTheo =
+          aarkMarket.position!.size - aarkStatus.skewness;
+      } else if (
         Math.abs(aarkSkewnessValue) > marketParam.skenessUSDTThreshold &&
         (this.localState.skewnessInfo[crypto].timestamp ?? Infinity) +
           marketParam.skewnessIntervalThreshold <
@@ -688,11 +751,6 @@ export class Strategy {
 
     const okxUSDTBalance = this._getOkxUSDTBalance();
     const aarkUSDCBalance = this._getAarkUSDCBalance();
-    const maxPositionUSDT = Math.min(
-      this.params.MAX_TOTAL_POSITION_USDT,
-      Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
-        this.params.MAX_LEVERAGE
-    );
     let totalAbsPositionUSDT = this.params.TARGET_CRYPTO_LIST.reduce(
       (acc: number, crypto: string) => {
         const midPriceUSDT = this._getOKXMidPrice(crypto);
@@ -708,6 +766,12 @@ export class Strategy {
       const crypto = marketIndicator.crypto;
       const okxMarket = okxMarkets[`${crypto}_USDT`];
       const marketParam = this.params.MARKET_PARAMS[crypto];
+      const blackListHasPosition = blackListPositionMap[crypto] !== undefined;
+      const maxPositionUSDT = Math.min(
+        this.params.MAX_TOTAL_POSITION_USDT,
+        Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
+          (blackListHasPosition ? 15 : this.params.MAX_LEVERAGE) // HARD MAX LEVERGAGE = 15
+      );
       const price = this._getOKXMidPrice(crypto);
       const positionUSDTValue = Math.abs(okxMarket.position!.size) * price;
       let targetAarkPosition = marketIndicator.targetAarkPosition;
@@ -716,7 +780,10 @@ export class Strategy {
         marketIndicator.okxFundingTerm < threshold &&
         okxMarket.fundingRate!.fundingTime - Date.now() < ONE_MIN_IN_MS * 10;
 
-      if (dodgeOKXFunding(-this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD)) {
+      if (
+        !blackListHasPosition &&
+        dodgeOKXFunding(-this.params.OKX_FUNDING_RATE_DODGE_THRESHOLD)
+      ) {
         // Close position when impend to pay huge okx funding fee
         targetAarkPosition = 0;
       }

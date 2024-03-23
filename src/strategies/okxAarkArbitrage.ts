@@ -296,8 +296,8 @@ export class Strategy {
         dataFetchLatencyInfo["aarkService.fetchIndexPrices"] =
           Date.now() - timestamp;
       }),
-      this.aarkService.fetchUserStatus().then(() => {
-        dataFetchLatencyInfo["aarkService.fetchUserStatus"] =
+      this.aarkService.fetchSignerStatus().then(() => {
+        dataFetchLatencyInfo["aarkService.fetchSignerStatus"] =
           Date.now() - timestamp;
       }),
       ,
