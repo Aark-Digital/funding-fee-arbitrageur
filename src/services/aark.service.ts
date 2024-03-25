@@ -251,10 +251,10 @@ export class AarkService {
       return [balances, positions];
     } catch (e) {
       console.log(`[Aark Service] Failed to fetch address status: ${e}`);
-      this.symbolList.forEach((symbol: string) => {
-        this.markets[symbol].position = undefined;
-      });
-      this.balances = undefined;
+      // this.symbolList.forEach((symbol: string) => {
+      //   this.markets[symbol].position = undefined;
+      // });
+      // this.balances = undefined;
       return [undefined, undefined];
     }
   }
