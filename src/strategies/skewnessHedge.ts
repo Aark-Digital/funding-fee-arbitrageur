@@ -417,12 +417,35 @@ export class Strategy {
     (this.params.BLACK_LIST as string[]).forEach(
       (address: string, i: number) => {
         const [balance, position] = blackListInfo[i];
-        this.localState.blackListInfo[address] = {
-          timestamp,
-          priority: i,
-          balance,
-          position,
-        };
+        if (
+          this.localState.blackListInfo[address] === undefined ||
+          balance === undefined ||
+          position === undefined
+        ) {
+          this.localState.blackListInfo[address] = {
+            timestamp: 0,
+            priority: i,
+            balance,
+            position,
+          };
+        } else {
+          const addressInfo = this.localState.blackListInfo[address];
+          addressInfo.timestamp = timestamp;
+          addressInfo.balance = balance;
+          addressInfo.position!.forEach((pos, idx) => {
+            const newPos = position![idx];
+            if (pos.size != newPos.size) {
+              this.monitorService.slackMessage(
+                "BLACK LIST TRADED",
+                `${address} has traded in ${pos.symbol}. Position changed from ${pos.size} to ${newPos.size}`,
+                60_000,
+                true,
+                false
+              );
+              pos = newPos;
+            }
+          });
+        }
       }
     );
   }
@@ -714,26 +737,53 @@ export class Strategy {
         }
       }
 
+      let lastBlackListTradeTimestamp = 0;
+      let blackListPosSum = 0;
+      Object.keys(this.localState.blackListInfo)
+        .filter(
+          (address: string) =>
+            this.localState.blackListInfo[address] !== undefined &&
+            this.localState.blackListInfo[address].position !== undefined
+        )
+        .forEach((address: string) => {
+          const positions = this.localState.blackListInfo[address].position!;
+
+          const pos = positions.find(
+            (val: Position) => val.symbol === `${crypto}_USDC`
+          )!;
+          lastBlackListTradeTimestamp = Math.max(
+            lastBlackListTradeTimestamp,
+            pos.timestamp
+          );
+          blackListPosSum += pos.size;
+        });
+
       if (blackListHasPosition) {
         targetAarkPositionTheo =
-          aarkMarket.position!.size - aarkStatus.skewness;
-      } else if (
-        Math.abs(aarkSkewnessValue) > marketParam.skenessUSDTThreshold &&
-        (this.localState.skewnessInfo[crypto].timestamp ?? Infinity) +
-          marketParam.skewnessIntervalThreshold <
-          timestamp
-      ) {
-        targetAarkPositionTheo =
-          aarkMarket.position!.size - aarkStatus.skewness;
+          blackListPosSum * aarkStatus.skewness > 0
+            ? aarkMarket.position!.size - aarkStatus.skewness
+            : aarkMarket.position!.size;
       } else {
-        targetAarkPositionTheo = aarkMarket.position!.size;
+        if (
+          Math.abs(aarkSkewnessValue) >
+            marketParam.skenessUSDTThreshold *
+              (lastBlackListTradeTimestamp + 60_000 > timestamp ? 0.5 : 1) &&
+          (this.localState.skewnessInfo[crypto].timestamp ?? Infinity) +
+            marketParam.skewnessIntervalThreshold <
+            timestamp
+        ) {
+          targetAarkPositionTheo =
+            aarkMarket.position!.size - aarkStatus.skewness;
+        } else {
+          targetAarkPositionTheo = aarkMarket.position!.size;
+        }
+        targetAarkPositionTheo =
+          (targetAarkPositionTheo > 0 ? 1 : -1) *
+          Math.min(
+            Math.abs(targetAarkPositionTheo),
+            marketParam.maxPositionUSDT / aarkMarket.indexPrice!
+          );
       }
-      targetAarkPositionTheo =
-        (targetAarkPositionTheo > 0 ? 1 : -1) *
-        Math.min(
-          Math.abs(targetAarkPositionTheo),
-          marketParam.maxPositionUSDT / aarkMarket.indexPrice!
-        );
 
       const okxFundingTerm =
         okxMarket.fundingRate!.fundingRate *
