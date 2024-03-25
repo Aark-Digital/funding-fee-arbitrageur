@@ -1,6 +1,7 @@
 import BigNumber from "bignumber.js";
 import { IMarketInfo } from "../interfaces/market-interface";
 
+export const EPSILON = 1e-6;
 export function floor_dp(n: number, d: number) {
   return Math.floor(n * 10 ** d) / 10 ** d;
 }
