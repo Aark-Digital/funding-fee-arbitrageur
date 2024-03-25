@@ -10,7 +10,7 @@ import { IActionParam } from "../interfaces/order-interface";
 import { AarkService } from "../services/aark.service";
 import { MonitorService } from "../services/monitor.service";
 import { OkxSwapService } from "../services/okx.service";
-import { formatNumber, round_dp } from "../utils/number";
+import { formatNumber, round_dp, EPSILON } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
 import { ONE_HOUR_IN_MS } from "../utils/time";
 import { isValidData } from "../utils/validation";
@@ -668,7 +668,7 @@ export class Strategy {
           )) /
         price;
       targetAarkPosition =
-        Math.abs(targetAarkPosition) < 1e-5 ? 0 : targetAarkPosition;
+        Math.abs(targetAarkPosition) < EPSILON ? 0 : targetAarkPosition;
 
       marketIndicator.targetAarkPosition = targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
