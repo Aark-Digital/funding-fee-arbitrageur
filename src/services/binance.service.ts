@@ -1,3 +1,4 @@
+import cron from "node-cron";
 import axios from "axios";
 import CryptoJS from "crypto-js";
 import { IMarket } from "../interfaces/market-interface";
@@ -31,6 +32,7 @@ export class BinanceSwapService {
   private markets: { [symbol: string]: IMarket } = {};
   private balances: undefined | Balance[];
   private orderbookUpdates: { [symbol: string]: any[] } = {};
+  private orderbookResetFlag: boolean = false;
   private apiInfo: {
     apiKey: string;
     secret: string;
@@ -69,7 +71,6 @@ export class BinanceSwapService {
   async init() {
     this.initializeOrderbookStream();
     const totalMarketInfo = await this._publicGet("/fapi/v1/exchangeInfo", {});
-    // console.log(totalMarketInfo);
     this.symbolList.forEach((symbol: string) => {
       const targetSymbol = `${this.getFormattedSymbol(symbol)}`;
       const marketInfo = totalMarketInfo.symbols.find(
@@ -89,30 +90,41 @@ export class BinanceSwapService {
       };
     });
 
+    cron.schedule("0 * * * *", () => {
+      this.initializeOrderbookStream();
+    });
+
     await sleep(5000);
   }
 
   private async initializeOrderbookStream() {
-    do {
-      const timestamp = Date.now();
-      this._initializeOrderbookStream(timestamp);
-      await sleep(1000);
-      for (const symbol of this.symbolList) {
-        await this.__initializeOrderbookSnapshot(
-          this.getFormattedSymbol(symbol).toLowerCase()
-        );
-      }
-      console.log("Finished to initialize orderbook");
-      await sleep(timestamp + 3_600_000 - Date.now());
-      console.log("RE-INITIALIZE ORDERBOOK : ", new Date().toISOString());
-      this.symbolList.forEach((symbol) => {
-        const fsymbol = this.getFormattedSymbol(symbol).toLowerCase();
-        this.avlOrderbooks[fsymbol] = undefined;
-        this.orderbookUpdates[fsymbol] = [];
-      });
-      this.avlOrderbooks = {};
-      this.orderbookUpdates = {};
-    } while (1);
+    if (!isFinite(this.orderbookAvailableTimestamp)) {
+      console.log("Already initializing...");
+      return;
+    }
+
+    this.orderbookAvailableTimestamp = Infinity;
+    const timestamp = Date.now();
+    this.orderbookResetFlag = true;
+    await sleep(5000);
+
+    this.symbolList.forEach((symbol) => {
+      const fsymbol = this.getFormattedSymbol(symbol).toLowerCase();
+      this.avlOrderbooks[fsymbol] = undefined;
+      this.orderbookUpdates[fsymbol] = [];
+    });
+    this.orderbookResetFlag = false;
+
+    this._initializeOrderbookStream(timestamp);
+    await sleep(1000);
+    console.log("Initialize orderbook snapshot...");
+    for (const symbol of this.symbolList) {
+      await this.__initializeOrderbookSnapshot(
+        this.getFormattedSymbol(symbol).toLowerCase()
+      );
+    }
+    console.log("Finished to initialize orderbook");
+    this.orderbookAvailableTimestamp = Date.now() + 1_000;
   }
 
   private async _initializeOrderbookStream(ts: number) {
@@ -141,7 +153,11 @@ export class BinanceSwapService {
         } as any,
       ],
     });
+
     for await (const messageResponse of messages) {
+      if (this.orderbookResetFlag) {
+        break;
+      }
       const message = messageResponse.message;
       if (message.stream === undefined) {
         continue;
@@ -172,15 +188,12 @@ export class BinanceSwapService {
             bids,
             update.b.map((d: any) => [Number(d[0]), Number(d[1])])
           );
+          orderbook!.timestamp = Number(update.E);
           orderbook!.seqId = update.u;
         }
       }
-      const currentTimestamp = Date.now();
-      if (currentTimestamp - ts > 3_600_000) {
-        console.log(`CLEAR-ORDERBOOK  ${new Date().toISOString()}`);
-        break;
-      }
     }
+    console.log("TERMINATE ORDERBOOK STREAM");
   }
 
   async __initializeOrderbookSnapshot(symbol: string) {
@@ -198,13 +211,12 @@ export class BinanceSwapService {
         );
       }
       try {
-        console.log(`Fetch Binance Futures ${symbol} Orderbook`);
+        console.log(`Fetch binance futures ${symbol} Orderbook`);
         const orderbook = await axios
           .get(
             `https://fapi.binance.com/fapi/v1/depth?symbol=${symbol.toUpperCase()}&limit=1000`
           )
           .then((res) => res.data);
-        console.log(orderbook.lastUpdateId);
         const targetOrderbookUpdates = this.orderbookUpdates[symbol].filter(
           (update) => update.u >= orderbook.lastUpdateId
         );
@@ -321,10 +333,12 @@ export class BinanceSwapService {
           openOrders: marketOpenOrders.map((oo: any) => ({
             timestamp,
             symbol,
-            orderId: oo.orderId,
+            orderId: oo.orderId.toString(),
             price: Number(oo.price),
             size: oo.side === "BUY" ? Number(oo.origQty) : -Number(oo.origQty),
-            remaining: Number(oo.origQty) - Number(oo.executeQty),
+            remaining:
+              (oo.side === "BUY" ? 1 : -1) * Number(oo.origQty) -
+              Number(oo.executedQty),
           })),
           timestamp,
         };
@@ -341,7 +355,6 @@ export class BinanceSwapService {
         "/fapi/v1/premiumIndex",
         {}
       );
-      console.log(fundingRates);
       this.symbolList.forEach((symbol: string) => {
         const fsymbol = this.getFormattedSymbol(symbol);
         const fr = fundingRates.find((v) => v.symbol === fsymbol);
@@ -503,8 +516,6 @@ export class BinanceSwapService {
       signature: this._getSignatureFromParams(params, this.apiInfo.secret),
     });
     const url = this.baseUrl + endPoint;
-    console.log(url);
-    console.log(paramsWithSignature);
     const response = await axios.post(this.baseUrl + endPoint, null, {
       headers: {
         "X-MBX-APIKEY": process.env.BINANCE_API_KEY!,
@@ -517,17 +528,12 @@ export class BinanceSwapService {
 
   private async _delete(endPoint: string, params: { [key: string]: string }) {
     const paramsWithSignature = Object.assign(params, {
-      signature: this._getSignatureFromParams(
-        params,
-        process.env.BINANCE_SECRET!
-      ),
+      signature: this._getSignatureFromParams(params, this.apiInfo.secret),
     });
     const url = this.baseUrl + endPoint;
-    console.log(url);
-    console.log(paramsWithSignature);
     const response = await axios.delete(this.baseUrl + endPoint, {
       headers: {
-        "X-MBX-APIKEY": process.env.BINANCE_API_KEY!,
+        "X-MBX-APIKEY": this.apiInfo.apiKey,
       },
       params: paramsWithSignature,
       timeout: 5000,
