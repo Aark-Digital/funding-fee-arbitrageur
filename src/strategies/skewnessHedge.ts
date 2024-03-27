@@ -1110,6 +1110,21 @@ export class Strategy {
     );
     const arbitrageur = this.aarkService.getSigner();
 
+    if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
+      this.monitorService.slackMessage(
+        `REBALACE ERROR`,
+        `undefined withdrawAmount : ${withdrawAmount}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
     if (withdrawAmount === 0) {
       this.localState.rebalanceState = {
         state: RebalanceState.NONE,
@@ -1296,6 +1311,21 @@ export class Strategy {
       ),
       4
     );
+
+    if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
+      this.monitorService.slackMessage(
+        `REBALACE ERROR`,
+        `undefined withdrawAmount : ${withdrawAmount}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
 
     if (withdrawAmount === 0) {
       this.localState.rebalanceState = {
