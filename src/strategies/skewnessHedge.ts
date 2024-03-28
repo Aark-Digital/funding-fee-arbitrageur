@@ -97,7 +97,7 @@ export class Strategy {
         crypto,
         skewnessValue: aarkSkewnessValue,
         timestamp:
-          Math.abs(aarkSkewnessValue) > marketParam.skenessUSDTThreshold
+          Math.abs(aarkSkewnessValue) > marketParam.skewnessUSDTThreshold
             ? timestamp
             : undefined,
       };
@@ -739,7 +739,7 @@ export class Strategy {
       const aarkSkewnessValue = aarkStatus.skewness * aarkMarket.indexPrice!;
 
       this.localState.skewnessInfo[crypto].skewnessValue = aarkSkewnessValue;
-      if (Math.abs(aarkSkewnessValue) < marketParam.skenessUSDTThreshold) {
+      if (Math.abs(aarkSkewnessValue) < marketParam.skewnessUSDTThreshold) {
         this.localState.skewnessInfo[crypto].timestamp = undefined;
       } else {
         if (this.localState.skewnessInfo[crypto].timestamp === undefined) {
@@ -755,7 +755,7 @@ export class Strategy {
       } else {
         if (
           Math.abs(aarkSkewnessValue) >
-            marketParam.skenessUSDTThreshold *
+            marketParam.skewnessUSDTThreshold *
               (lastBlackListTradeTimestamp + 60_000 > timestamp ? 0.5 : 1) &&
           (this.localState.skewnessInfo[crypto].timestamp ?? Infinity) +
             marketParam.skewnessIntervalThreshold <
