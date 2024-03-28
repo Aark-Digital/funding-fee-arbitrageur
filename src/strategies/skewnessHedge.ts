@@ -808,7 +808,9 @@ export class Strategy {
       const maxPositionUSDT = Math.min(
         this.params.MAX_TOTAL_POSITION_USDT,
         Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
-          (blackListHasPosition ? 15 : this.params.MAX_LEVERAGE) // HARD MAX LEVERGAGE = 15
+          (blackListHasPosition
+            ? this.params.MAX_LEVERAGE + 5
+            : this.params.MAX_LEVERAGE) // HARD MAX LEVERGAGE = 15
       );
       const price = this._getOKXMidPrice(crypto);
       const positionUSDTValue = Math.abs(okxMarket.position!.size) * price;
