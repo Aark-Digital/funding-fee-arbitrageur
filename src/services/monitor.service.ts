@@ -45,14 +45,15 @@ export class MonitorService {
       console.log(`UNDEINFED SLACK PARAM`);
       return;
     }
-    const timestamp = new Date().getTime();
-    if (this._isSlackSentRecently(topic, timestamp, interval)) {
-      return;
-    }
     const text =
       (tagManager ? `<@${this.slackParam.managerSlackId}> ` : "") +
       `*${new Date().toISOString()}*\n` +
       `[${topic}]\n${desc}`;
+    console.log(text);
+    const timestamp = new Date().getTime();
+    if (this._isSlackSentRecently(topic, timestamp, interval)) {
+      return;
+    }
     if (call) {
       this._twilioCall();
     }
