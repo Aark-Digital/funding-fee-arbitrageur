@@ -985,34 +985,22 @@ export class Strategy {
       marketIndicator.targetAarkPosition - aarkMarket.position!.size;
     let orderSizeInAark = 0;
     if (targetPositionDelta > 0) {
-      orderSizeInAark = this._getArbBuyAmountInAark(
+      orderSizeInAark =
+        this._getArbBuyAmountInAark(
         okxMarket.orderbook!,
         marketParam.maxOrderbookSlippage
-      );
-      // console.log(
-      //   crypto,
-      //   "long",
-      //   targetPositionDelta,
-      //   marketIndicator.targetAarkPosition,
-      //   orderSizeInAark
-      // );
+        ) * okxMarket.marketInfo.contractSize;
       return Math.min(
         targetPositionDelta,
         orderSizeInAark,
         this.params.MAX_ORDER_USDT / midPriceUSDC
       );
     } else if (targetPositionDelta < 0) {
-      orderSizeInAark = this._getArbSellAmountInAark(
+      orderSizeInAark =
+        this._getArbSellAmountInAark(
         okxMarket.orderbook!,
         marketParam.maxOrderbookSlippage
-      );
-      // console.log(
-      //   crypto,
-      //   "short",
-      //   targetPositionDelta,
-      //   marketIndicator.targetAarkPosition,
-      //   orderSizeInAark
-      // );
+        ) * okxMarket.marketInfo.contractSize;
       return Math.max(
         targetPositionDelta,
         orderSizeInAark,
