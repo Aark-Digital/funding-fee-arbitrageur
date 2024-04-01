@@ -315,21 +315,25 @@ export class Strategy {
         `Failed to execute order : ${e}`,
         0,
         true,
-        true
+        false
       );
     }
 
     console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
     if (!hedged) {
-      this.monitorService.slackMessage(
-        `ARBITRAGEUR UNHEDGED`,
-        `Unhedged for ${this.localState.unhedgedCnt} iteration`,
-        60_000,
-        true,
-        true
-      );
+      this.localState.unhedgedCnt += 1;
+      if (this.localState.unhedgedCnt > 5) {
+        this.monitorService.slackMessage(
+          `ARBITRAGEUR UNHEDGED`,
+          `Unhedged for ${this.localState.unhedgedCnt} iteration`,
+          60_000,
+          true,
+          true
+        );
+      }
     } else {
       this._logOrderInfoToSlack(okxActionParams, aarkActionParams, tradeInfo);
+      this.localState.unhedgedCnt = 0;
     }
 
     return;
@@ -438,19 +442,19 @@ export class Strategy {
           } else {
             position.forEach((newPos, idx) => {
               if (addressInfo.position![idx].size != newPos.size) {
-              this.monitorService.slackMessage(
+                this.monitorService.slackMessage(
                   `BLACK LIST ${address} TRADED IN ${newPos.symbol}`,
                   `Position changed from ${round_dp(
                     addressInfo.position![idx].size,
                     4
                   )} to ${round_dp(newPos.size, 4)}`,
                   10_000,
-                true,
-                false
-              );
+                  true,
+                  false
+                );
                 addressInfo.position![idx] = newPos;
-            }
-          });
+              }
+            });
           }
         }
       }
@@ -987,8 +991,8 @@ export class Strategy {
     if (targetPositionDelta > 0) {
       orderSizeInAark =
         this._getArbBuyAmountInAark(
-        okxMarket.orderbook!,
-        marketParam.maxOrderbookSlippage
+          okxMarket.orderbook!,
+          marketParam.maxOrderbookSlippage
         ) * okxMarket.marketInfo.contractSize;
       return Math.min(
         targetPositionDelta,
@@ -998,8 +1002,8 @@ export class Strategy {
     } else if (targetPositionDelta < 0) {
       orderSizeInAark =
         this._getArbSellAmountInAark(
-        okxMarket.orderbook!,
-        marketParam.maxOrderbookSlippage
+          okxMarket.orderbook!,
+          marketParam.maxOrderbookSlippage
         ) * okxMarket.marketInfo.contractSize;
       return Math.max(
         targetPositionDelta,
