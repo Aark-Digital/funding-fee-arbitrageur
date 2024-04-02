@@ -261,6 +261,9 @@ export async function uniswapArbitrum(
 
   // For Metamask it will be just "await contractIn.approve(V3_SWAP_ROUTER_ADDRESS, amountIn);"
 
+  console.log("5-0 Get Swap gasLimit");
+  const l2Factor = await getL2Factor(provider);
+
   // here we just create a transaction object (not sending it to blockchain).
   console.log("5-1. Get approveTxUnsigned");
   const approveTxUnsigned = await contractIn.populateTransaction.approve(
@@ -271,6 +274,9 @@ export async function uniswapArbitrum(
   approveTxUnsigned.chainId = chainId;
   // estimate gas required to make approve call (not sending it to blockchain either)
   console.log("5-2. Estimate gasLimit");
+  const approveGasLimit = BigNumber.from(
+    500_000 + (((approveTxUnsigned.data ?? "").length - 2) / 2) * l2Factor
+  );
   approveTxUnsigned.gasLimit = await contractIn.estimateGas.approve(
     V3_SWAP_ROUTER_ADDRESS,
     amountIn
@@ -279,9 +285,9 @@ export async function uniswapArbitrum(
     `approveTxUnsigned.gasLimit : ${approveTxUnsigned.gasLimit.toString()}`
   );
   approveTxUnsigned.gasLimit =
-    approveTxUnsigned.gasLimit > BigNumber.from(500_000)
+    approveTxUnsigned.gasLimit > approveGasLimit
       ? approveTxUnsigned.gasLimit
-      : BigNumber.from(500_000);
+      : approveGasLimit;
   // suggested gas price (increase if you want faster execution)
   console.log("5-3. Estimate gasPrice");
   approveTxUnsigned.gasPrice = await provider.getGasPrice();
@@ -306,7 +312,6 @@ export async function uniswapArbitrum(
     throw new Error("Approve transaction failed");
 
   console.log("5-7 Get Swap gasLimit");
-  const l2Factor = await getL2Factor(provider);
   // const feeData = await provider.getFeeData();
   console.log(`calldata.length : ${route.methodParameters.calldata.length}`);
   const gasLimit = BigNumber.from(
