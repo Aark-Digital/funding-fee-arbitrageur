@@ -275,13 +275,25 @@ export async function uniswapArbitrum(
     V3_SWAP_ROUTER_ADDRESS,
     amountIn
   );
+  console.log(
+    `approveTxUnsigned.gasLimit : ${approveTxUnsigned.gasLimit.toString()}`
+  );
+  approveTxUnsigned.gasLimit =
+    approveTxUnsigned.gasLimit > BigNumber.from(500_000)
+      ? approveTxUnsigned.gasLimit
+      : BigNumber.from(500_000);
   // suggested gas price (increase if you want faster execution)
   console.log("5-3. Estimate gasPrice");
   approveTxUnsigned.gasPrice = await provider.getGasPrice();
+  console.log(
+    `approveTxUnsigned.gasLimit : ${approveTxUnsigned.gasPrice.toString()}`
+  );
   // nonce is the same as number previous transactions
   console.log("5-4. Get Nonce");
   approveTxUnsigned.nonce = await provider.getTransactionCount(walletAddress);
-
+  console.log(
+    `approveTxUnsigned.nonce : ${approveTxUnsigned.nonce.toString()}`
+  );
   // sign transaction by our signer
   console.log("5-5. Get TxSigned");
   const approveTxSigned = await signer.signTransaction(approveTxUnsigned);
