@@ -11,6 +11,7 @@ import { TradeType, Token, CurrencyAmount, Percent } from "@uniswap/sdk-core";
 import { AlphaRouter } from "@uniswap/smart-order-router";
 import IUniswapV3Pool from "@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Pool.sol/IUniswapV3Pool.json";
 import IUniswapV3Factory from "@uniswap/v3-core/artifacts/contracts/interfaces/IUniswapV3Factory.sol/IUniswapV3Factory.json";
+import { getL2Factor } from "./arbitrum";
 require("dotenv").config();
 
 const provider = new ethers.providers.JsonRpcProvider({
@@ -285,12 +286,20 @@ export async function uniswapArbitrum(
   console.log("5-5. Get TxSigned");
   const approveTxSigned = await signer.signTransaction(approveTxUnsigned);
   // submit transaction to blockchain
-  console.log("5-6. Send Transaction");
+  console.log("5-6. Send Approve Transaction");
   const submittedTx = await provider.sendTransaction(approveTxSigned);
   // wait till transaction completes
   const approveReceipt = await submittedTx.wait();
   if (approveReceipt.status === 0)
     throw new Error("Approve transaction failed");
+
+  console.log("5-7 Get Swap gasLimit");
+  const l2Factor = await getL2Factor(provider);
+  // const feeData = await provider.getFeeData();
+  console.log(`calldata.length : ${route.methodParameters.calldata.length}`);
+  const gasLimit = BigNumber.from(
+    500_000 + ((route.methodParameters.calldata.length - 2) / 2) * l2Factor
+  );
 
   console.log("6. Making a swap...");
   const value = BigNumber.from(route.methodParameters.value);
@@ -305,7 +314,7 @@ export async function uniswapArbitrum(
     // route.estimatedGasUsed might be too low!
     // most of swaps I tested fit into 300,000 but for some complex swaps this gas is not enough.
     // Loot at etherscan/polygonscan past results.
-    gasLimit: BigNumber.from("1000000"),
+    gasLimit,
   };
 
   var tx = await signer.sendTransaction(transaction);

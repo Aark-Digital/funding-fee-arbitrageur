@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@arbitrum/sdk": "^3.3.3",
     "@types/lodash": "^4.14.202",
     "@uniswap/sdk-core": "^4.2.0",
     "@uniswap/smart-order-router": "^3.25.1",
