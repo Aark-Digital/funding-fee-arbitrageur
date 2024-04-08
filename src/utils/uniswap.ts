@@ -275,7 +275,7 @@ export async function uniswapArbitrum(
   // estimate gas required to make approve call (not sending it to blockchain either)
   console.log("5-2. Estimate gasLimit");
   const approveGasLimit = BigNumber.from(
-    500_000 + (((approveTxUnsigned.data ?? "").length - 2) / 2) * l2Factor
+    1_000_000 + (((approveTxUnsigned.data ?? "").length - 2) / 2) * l2Factor
   );
   approveTxUnsigned.gasLimit = await contractIn.estimateGas.approve(
     V3_SWAP_ROUTER_ADDRESS,
