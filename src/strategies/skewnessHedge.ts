@@ -712,26 +712,24 @@ export class Strategy {
 
       let lastBlackListTradeTimestamp = 0;
       let blackListPosSum = 0;
-      if (crypto !== "BTC") {
-        Object.keys(this.localState.blackListInfo)
-          .filter(
-            (address: string) =>
-              this.localState.blackListInfo[address] !== undefined &&
-              this.localState.blackListInfo[address].position !== undefined
-          )
-          .forEach((address: string) => {
-            const positions = this.localState.blackListInfo[address].position!;
+      Object.keys(this.localState.blackListInfo)
+        .filter(
+          (address: string) =>
+            this.localState.blackListInfo[address] !== undefined &&
+            this.localState.blackListInfo[address].position !== undefined
+        )
+        .forEach((address: string) => {
+          const positions = this.localState.blackListInfo[address].position!;
 
-            const pos = positions.find(
-              (val: Position) => val.symbol === `${crypto}_USDC`
-            )!;
-            lastBlackListTradeTimestamp = Math.max(
-              lastBlackListTradeTimestamp,
-              pos.timestamp
-            );
-            blackListPosSum += pos.size;
-          });
-      }
+          const pos = positions.find(
+            (val: Position) => val.symbol === `${crypto}_USDC`
+          )!;
+          lastBlackListTradeTimestamp = Math.max(
+            lastBlackListTradeTimestamp,
+            pos.timestamp
+          );
+          blackListPosSum += pos.size;
+        });
       blackListPositionSizeMap[crypto] = blackListPosSum;
 
       const okxMarket = okxMarkets[`${crypto}_USDT`];
@@ -1283,7 +1281,7 @@ export class Strategy {
 
     this.monitorService.slackMessage(
       `REBALANCE START`,
-      `Rebalance from OKX to AARK started : ${JSON.stringify({
+      `Rebalance from AARK to OKX started : ${JSON.stringify({
         startTime: new Date().toISOString(),
       })}`,
       60_000,
