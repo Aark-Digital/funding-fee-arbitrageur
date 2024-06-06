@@ -748,25 +748,40 @@ export class Strategy {
           this.localState.skewnessInfo[crypto].timestamp = timestamp;
         }
       }
-      if (crypto === "ARB") {
-        console.log(
-          JSON.stringify({
-            aarkSkewnessValue,
-            skewness: aarkStatus.skewness,
-            posSize: aarkMarket.position!.size,
-            skewnessUSDTThreshold: marketParam.skewnessUSDTThreshold,
-            skewnessTimestamp: this.localState.skewnessInfo[crypto].timestamp,
-          })
-        );
-      }
+
       if (blackListPosSum !== 0) {
-        if (crypto === "ARB") {
-          console.log("11111111111");
-        }
+        // if (blackListPosSum > 0) {
+        //   if (aarkStatus.skewness > 0) {
+        //     targetAarkPositionTheo =
+        //       aarkMarket.position!.size - aarkStatus.skewness;
+        //   } else {
+        //     targetAarkPositionTheo = Math.min(
+        //       aarkMarket.position!.size - aarkStatus.skewness,
+        //       0
+        //     );
+        //   }
+        // } else {
+        //   if (aarkStatus.skewness < 0) {
+        //     targetAarkPositionTheo =
+        //       aarkMarket.position!.size - aarkStatus.skewness;
+        //   } else {
+        //     targetAarkPositionTheo = Math.max(
+        //       aarkMarket.position!.size - aarkStatus.skewness,
+        //       0
+        //     );
+        //   }
+        // }
+
+        // Short-form of above logic
+        if (blackListPosSum * aarkStatus.skewness >= 0) {
         targetAarkPositionTheo =
-          blackListPosSum * aarkStatus.skewness > 0
-            ? aarkMarket.position!.size - aarkStatus.skewness
-            : aarkMarket.position!.size;
+            aarkMarket.position!.size - aarkStatus.skewness;
+        } else {
+          targetAarkPositionTheo = (blackListPosSum > 0 ? Math.min : Math.max)(
+            aarkMarket.position!.size - aarkStatus.skewness,
+            0
+          );
+        }
       } else {
         if (
           Math.abs(aarkSkewnessValue) >
@@ -778,14 +793,8 @@ export class Strategy {
         ) {
           targetAarkPositionTheo =
             aarkMarket.position!.size - aarkStatus.skewness;
-          if (crypto === "ARB") {
-            console.log(crypto, "11111111111", targetAarkPositionTheo);
-          }
         } else {
           targetAarkPositionTheo = aarkMarket.position!.size;
-          if (crypto === "ARB") {
-            console.log(crypto, "2222222222", targetAarkPositionTheo);
-          }
         }
         targetAarkPositionTheo =
           (targetAarkPositionTheo > 0 ? 1 : -1) *
