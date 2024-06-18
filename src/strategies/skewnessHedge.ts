@@ -774,7 +774,7 @@ export class Strategy {
 
         // Short-form of above logic
         if (blackListPosSum * aarkStatus.skewness >= 0) {
-        targetAarkPositionTheo =
+          targetAarkPositionTheo =
             aarkMarket.position!.size - aarkStatus.skewness;
         } else {
           targetAarkPositionTheo = (blackListPosSum > 0 ? Math.min : Math.max)(
@@ -1132,7 +1132,7 @@ export class Strategy {
 
     if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
       this.monitorService.slackMessage(
-        `REBALACE ERROR`,
+        `REBALANCE ERROR`,
         `undefined withdrawAmount : ${withdrawAmount}`,
         60_000,
         true,
@@ -1160,6 +1160,12 @@ export class Strategy {
     };
 
     console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
+
+    this.localState.rebalanceState = {
+      state: RebalanceState.HALT,
+      timestamp,
+    };
+    return false;
 
     // Step 1 : Withdraw USDT from OKX
     try {
@@ -1334,7 +1340,7 @@ export class Strategy {
 
     if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
       this.monitorService.slackMessage(
-        `REBALACE ERROR`,
+        `REBALANCE ERROR`,
         `undefined withdrawAmount : ${withdrawAmount}`,
         60_000,
         true,
@@ -1368,6 +1374,12 @@ export class Strategy {
       withdrawAmount,
       this.params.MAX_REBALANCE_USDT
     );
+
+    this.localState.rebalanceState = {
+      state: RebalanceState.HALT,
+      timestamp,
+    };
+    return false;
 
     // Step 1 : Withdraw USDC from Aark
     try {
