@@ -290,10 +290,16 @@ export async function uniswapArbitrum(
       : approveGasLimit;
   // suggested gas price (increase if you want faster execution)
   console.log("5-3. Estimate gasPrice");
-  approveTxUnsigned.gasPrice = await provider.getGasPrice();
+  const gasPrice = await provider.getGasPrice();
+
+  approveTxUnsigned.maxFeePerGas = gasPrice.mul(12).div(10);
+  approveTxUnsigned.type = 2;
   // approveTxUnsigned.maxFeePerGas = approveTxUnsigned.gasPrice.mul(11).div(10);
   console.log(
-    `approveTxUnsigned.gasPricse : ${approveTxUnsigned.gasPrice.toString()}`
+    `approveTxUnsigned.maxFeePerGas : ${approveTxUnsigned.maxFeePerGas.toString()}`
+  );
+  console.log(
+    `approveTxUnsigned.maxFeePerGas : ${approveTxUnsigned.maxFeePerGas.toString()}`
   );
   // nonce is the same as number previous transactions
   console.log("5-4. Get Nonce");
