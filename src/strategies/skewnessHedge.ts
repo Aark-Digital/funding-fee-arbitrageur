@@ -1161,12 +1161,6 @@ export class Strategy {
 
     console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
 
-    this.localState.rebalanceState = {
-      state: RebalanceState.HALT,
-      timestamp,
-    };
-    return false;
-
     // Step 1 : Withdraw USDT from OKX
     try {
       const transferRes = await this.okxService.transferAsset(
@@ -1368,18 +1362,7 @@ export class Strategy {
       "OKX USDT Balance": okxUSDT,
       "Amount to Rebalance": withdrawAmount,
     };
-    console.log(
-      arbitrageur.address,
-      rebalanceInfo,
-      withdrawAmount,
-      this.params.MAX_REBALANCE_USDT
-    );
-
-    this.localState.rebalanceState = {
-      state: RebalanceState.HALT,
-      timestamp,
-    };
-    return false;
+    console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
 
     // Step 1 : Withdraw USDC from Aark
     try {
