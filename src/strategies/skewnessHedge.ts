@@ -636,7 +636,7 @@ export class Strategy {
     );
     if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 10_000 < timestamp &&
+      this.localState.rebalanceState.timestamp + 180_000 < timestamp &&
       okxBalanceUSDT + aarkBalanceUSDC <
         this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
