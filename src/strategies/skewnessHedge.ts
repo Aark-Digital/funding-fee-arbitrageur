@@ -636,7 +636,7 @@ export class Strategy {
     );
     if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 180_000 < timestamp &&
+      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
       okxBalanceUSDT + aarkBalanceUSDC <
         this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
@@ -652,7 +652,7 @@ export class Strategy {
       );
     } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 10_000 < timestamp &&
+      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
       okxBalanceUSDT <
         this.params.INITIAL_BALANCE_USDT *
           (this.params.BALANCE_RATIO_IN_OKX -
@@ -672,7 +672,7 @@ export class Strategy {
       this._rebalanceFromAarkToOkx();
     } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 10_000 < timestamp &&
+      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
       aarkBalanceUSDC <
         this.params.INITIAL_BALANCE_USDT *
           (this.params.BALANCE_RATIO_IN_AARK -
