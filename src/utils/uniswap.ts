@@ -292,7 +292,7 @@ export async function uniswapArbitrum(
   console.log("5-3. Estimate gasPrice");
   const gasPrice = await provider.getGasPrice();
 
-  approveTxUnsigned.maxFeePerGas = gasPrice.mul(12).div(10);
+  approveTxUnsigned.maxFeePerGas = gasPrice.mul(15).div(10);
   approveTxUnsigned.type = 2;
   // approveTxUnsigned.maxFeePerGas = approveTxUnsigned.gasPrice.mul(11).div(10);
   console.log(
