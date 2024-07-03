@@ -618,15 +618,32 @@ export class Strategy {
     }
   }
 
-  _checkBalance() {
+  async _checkBalance() {
     const timestamp = Date.now();
     const okxBalanceUSDT = this._getOkxUSDTBalance();
     const aarkBalanceUSDC = this._getAarkUSDCBalance();
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
+
+    const depositHistory = await this.okxService.fetchDepositHistory();
+    const okxPendingUSDT = depositHistory
+      .filter(
+        (info: any) =>
+          info.state != "2" &&
+          info.ccy === "USDT" &&
+          info.chain === "USDT-Arbitrum One"
+      )
+      .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
+    const blockedDeposit = depositHistory.filter(
+      (info: any) =>
+        Number(info.state) >= 8 &&
+        info.ccy === "USDT" &&
+        info.chain === "USDT-Arbitrum One"
+    );
     console.log(
       JSON.stringify({
         okxUSDT: round_dp(okxBalanceUSDT, 2),
         aarkUSDC: round_dp(aarkBalanceUSDC, 2),
+        okxPendingUSDT: round_dp(okxPendingUSDT, 2),
         totalUSDT: round_dp(
           okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
           2
@@ -634,10 +651,19 @@ export class Strategy {
         rebalanceState: this.localState.rebalanceState.state,
       })
     );
-    if (
+    if (blockedDeposit.length > 0) {
+      this.monitorService.slackMessage(
+        "OKX USDT DEPOSIT BLOCKED",
+        JSON.stringify(blockedDeposit),
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState.state = RebalanceState.HALT;
+    } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
       this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
-      okxBalanceUSDT + aarkBalanceUSDC <
+      okxBalanceUSDT + aarkBalanceUSDC + okxPendingUSDT <
         this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
       this.monitorService.slackMessage(
@@ -653,7 +679,7 @@ export class Strategy {
     } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
       this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
-      okxBalanceUSDT <
+      okxBalanceUSDT + okxPendingUSDT <
         this.params.INITIAL_BALANCE_USDT *
           (this.params.BALANCE_RATIO_IN_OKX -
             this.params.BALANCE_RATIO_DIFF_THRESHOLD)
@@ -666,7 +692,7 @@ export class Strategy {
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        false
+        true
       );
       this.localState.rebalanceState.state = RebalanceState.AARK_TO_OKX;
       this._rebalanceFromAarkToOkx();
@@ -686,7 +712,7 @@ export class Strategy {
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        false
+        true
       );
       this.localState.rebalanceState.state = RebalanceState.OKX_TO_AARK;
       this._rebalanceFromOkxToAark();

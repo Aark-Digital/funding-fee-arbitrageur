@@ -421,6 +421,14 @@ export class OkxSwapService {
     return response.data[0];
   }
 
+  async fetchDepositHistory() {
+    const response = await this._privateGet(
+      "/api/v5/asset/deposit-history",
+      {}
+    );
+    return response.data;
+  }
+
   async transferAsset(currency: string, amount: number, fromTrading: boolean) {
     const response = await this._post("/api/v5/asset/transfer", {
       type: "0",
