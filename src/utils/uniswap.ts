@@ -275,7 +275,7 @@ export async function uniswapArbitrum(
   // estimate gas required to make approve call (not sending it to blockchain either)
   console.log("5-2. Estimate gasLimit");
   const approveGasLimit = BigNumber.from(
-    1_000_000 + (((approveTxUnsigned.data ?? "").length - 2) / 2) * l2Factor
+    3_000_000 + (((approveTxUnsigned.data ?? "").length - 2) / 2) * l2Factor
   );
   approveTxUnsigned.gasLimit = await contractIn.estimateGas.approve(
     V3_SWAP_ROUTER_ADDRESS,
@@ -290,17 +290,18 @@ export async function uniswapArbitrum(
       : approveGasLimit;
   // suggested gas price (increase if you want faster execution)
   console.log("5-3. Estimate gasPrice");
-  const gasPrice = await provider.getGasPrice();
+  // const gasPrice = await provider.getGasPrice();
+  // const feeData = await provider.getFeeData();
 
-  approveTxUnsigned.maxFeePerGas = gasPrice.mul(15).div(10);
-  approveTxUnsigned.type = 2;
+  // approveTxUnsigned.maxFeePerGas = gasPrice.mul(15).div(10);
+  // approveTxUnsigned.type = 2;
+  // approveTxUnsigned.maxPriorityFeePerGas = BigNumber.from(
+  //   feeData.maxPriorityFeePerGas!.toString()
+  // );
+  // console.log(
+  //   `approveTxUnsigned.maxPriorityFeePerGas : ${approveTxUnsigned.maxPriorityFeePerGas.toString()}`
+  // );
   // approveTxUnsigned.maxFeePerGas = approveTxUnsigned.gasPrice.mul(11).div(10);
-  console.log(
-    `approveTxUnsigned.maxFeePerGas : ${approveTxUnsigned.maxFeePerGas.toString()}`
-  );
-  console.log(
-    `approveTxUnsigned.maxFeePerGas : ${approveTxUnsigned.maxFeePerGas.toString()}`
-  );
   // nonce is the same as number previous transactions
   console.log("5-4. Get Nonce");
   approveTxUnsigned.nonce = await provider.getTransactionCount(walletAddress);
@@ -322,7 +323,7 @@ export async function uniswapArbitrum(
   // const feeData = await provider.getFeeData();
   console.log(`calldata.length : ${route.methodParameters.calldata.length}`);
   const gasLimit = BigNumber.from(
-    500_000 + ((route.methodParameters.calldata.length - 2) / 2) * l2Factor
+    3_000_000 + ((route.methodParameters.calldata.length - 2) / 2) * l2Factor
   );
 
   console.log("6. Making a swap...");
