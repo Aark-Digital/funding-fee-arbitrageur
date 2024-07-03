@@ -150,7 +150,7 @@ export class Strategy {
 
     await this._updateBlackListInfo();
 
-    this._checkBalance();
+    await this._checkBalance();
 
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
