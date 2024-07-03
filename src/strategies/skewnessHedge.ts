@@ -50,6 +50,7 @@ export class Strategy {
     skewnessInfo: {} as {
       [key: string]: SkewnessInfo;
     },
+    okxPendingUSDT: 0,
     blackListInfo: {} as {
       [address: string]: {
         timestamp: number;
@@ -520,12 +521,14 @@ export class Strategy {
   _logBalanceToSlack() {
     const okx = this._getOkxUSDTBalance();
     const aark = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
     this.monitorService.slackMessage(
       "BALANCE INFO",
       JSON.stringify({
         "AARK USDC Balance": aark.toFixed(2),
         "OKX USDT Balance": okx.toFixed(2),
+        "OKX Pending USDT": okxPendingUSDT.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
         "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
         "Rebalance State": this.localState.rebalanceState.state,
@@ -539,13 +542,16 @@ export class Strategy {
   _logBalance() {
     const okx = this._getOkxUSDTBalance();
     const aark = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
     console.log(
       JSON.stringify({
         "AARK USDC Balance": aark.toFixed(2),
         "OKX USDT Balance": okx.toFixed(2),
+        "OKX Pending USDT": okxPendingUSDT.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
         "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
+        "Rebalance State": this.localState.rebalanceState.state,
       })
     );
   }
@@ -633,6 +639,7 @@ export class Strategy {
           info.chain === "USDT-Arbitrum One"
       )
       .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
+    this.localState.okxPendingUSDT = okxPendingUSDT;
     const blockedDeposit = depositHistory.filter(
       (info: any) =>
         Number(info.state) >= 8 &&
@@ -645,7 +652,7 @@ export class Strategy {
         aarkUSDC: round_dp(aarkBalanceUSDC, 2),
         okxPendingUSDT: round_dp(okxPendingUSDT, 2),
         totalUSDT: round_dp(
-          okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
+          okxPendingUSDT + okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
           2
         ),
         rebalanceState: this.localState.rebalanceState.state,
@@ -846,6 +853,7 @@ export class Strategy {
 
     const okxUSDTBalance = this._getOkxUSDTBalance();
     const aarkUSDCBalance = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     let totalAbsPositionUSDT = this.params.TARGET_CRYPTO_LIST.reduce(
       (acc: number, crypto: string) => {
         const midPriceUSDT = this._getOKXMidPrice(crypto);
@@ -863,7 +871,10 @@ export class Strategy {
       const blackListHasPosition = blackListPositionSizeMap[crypto] !== 0;
       const maxPositionUSDT = Math.min(
         this.params.MAX_TOTAL_POSITION_USDT,
-        Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
+        Math.min(
+          okxPendingUSDT + okxUSDTBalance,
+          aarkUSDCBalance * USDC_USDT_PRICE
+        ) *
           (blackListHasPosition
             ? this.params.MAX_LEVERAGE + 5
             : this.params.MAX_LEVERAGE) // HARD MAX LEVERGAGE = 15
@@ -1143,10 +1154,12 @@ export class Strategy {
 
     const aarkUSDC = this._getAarkUSDCBalance();
     const okxUSDT = this._getOkxUSDTBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const withdrawAmount = round_dp(
       Math.max(
         Math.min(
-          okxUSDT -
+          okxPendingUSDT +
+            okxUSDT -
             this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_OKX,
           this.params.MAX_REBALANCE_USDT
         ),
@@ -1181,7 +1194,7 @@ export class Strategy {
 
     const rebalanceInfo = {
       "AARK USDC Balance": aarkUSDC,
-      "OKX USDT Balance": okxUSDT,
+      "OKX USDT Balance": okxUSDT + okxPendingUSDT,
       "Amount to Rebalance": withdrawAmount,
     };
 
@@ -1345,6 +1358,7 @@ export class Strategy {
 
     const aarkUSDC = this._getAarkUSDCBalance();
     const okxUSDT = this._getOkxUSDTBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const withdrawAmount = round_dp(
       Math.max(
         Math.min(
@@ -1385,7 +1399,7 @@ export class Strategy {
 
     const rebalanceInfo = {
       "AARK USDC Balance": aarkUSDC,
-      "OKX USDT Balance": okxUSDT,
+      "OKX USDT Balance": okxUSDT + okxPendingUSDT,
       "Amount to Rebalance": withdrawAmount,
     };
     console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
