@@ -334,7 +334,8 @@ export async function uniswapArbitrum(
     to: V3_SWAP_ROUTER_ADDRESS,
     value: value,
     from: walletAddress,
-    gasPrice: route.gasPriceWei,
+    maxFeePerGas: feeData.maxFeePerGas!,
+    type: 2,
 
     // route.estimatedGasUsed might be too low!
     // most of swaps I tested fit into 300,000 but for some complex swaps this gas is not enough.
