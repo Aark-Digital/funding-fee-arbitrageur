@@ -294,12 +294,12 @@ export async function uniswapArbitrum(
   const feeData = await provider.getFeeData();
 
   // approveTxUnsigned.maxFeePerGas = gasPrice.mul(15).div(10);
-  // approveTxUnsigned.type = 2;
-  approveTxUnsigned.maxPriorityFeePerGas = BigNumber.from(
-    feeData.maxPriorityFeePerGas!.toString()
+  approveTxUnsigned.type = 2;
+  approveTxUnsigned.maxFeePerGas = BigNumber.from(
+    feeData.maxFeePerGas!.toString()
   );
   console.log(
-    `approveTxUnsigned.maxPriorityFeePerGas : ${approveTxUnsigned.maxPriorityFeePerGas.toString()}`
+    `approveTxUnsigned.maxPriorityFeePerGas : ${approveTxUnsigned.maxFeePerGas.toString()}`
   );
   // approveTxUnsigned.maxFeePerGas = approveTxUnsigned.gasPrice.mul(11).div(10);
   // nonce is the same as number previous transactions
