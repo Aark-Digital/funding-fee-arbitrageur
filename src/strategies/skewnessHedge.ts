@@ -530,7 +530,9 @@ export class Strategy {
         "OKX USDT Balance": okx.toFixed(2),
         "OKX Pending USDT": okxPendingUSDT.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
-        "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
+        "TOTAL USDT": (okxPendingUSDT + okx + aark * USDC_USDT_PRICE).toFixed(
+          2
+        ),
         "Rebalance State": this.localState.rebalanceState.state,
       }),
       60_000,
