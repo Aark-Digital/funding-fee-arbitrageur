@@ -856,7 +856,7 @@ export class Strategy {
     const okxUSDTBalance = this._getOkxUSDTBalance();
     const aarkUSDCBalance = this._getAarkUSDCBalance();
     const okxPendingUSDT = this.localState.okxPendingUSDT;
-    const totalAbsPositionUSDT = this.params.TARGET_CRYPTO_LIST.reduce(
+    let totalAbsPositionUSDT = this.params.TARGET_CRYPTO_LIST.reduce(
       (acc: number, crypto: string) => {
         const midPriceUSDT = this._getOKXMidPrice(crypto);
         return (
@@ -915,6 +915,16 @@ export class Strategy {
 
       marketIndicator.targetAarkPosition = targetAarkPosition;
       targetAarkPositions[marketIndicator.crypto] = marketIndicator;
+
+      // totalAbsPositionUSDT += Math.max(
+      //   0,
+      //   (Math.abs(marketIndicator.targetAarkPositionTheo) * price >
+      //   marketParam.minOrderUSDT
+      //     ? Math.abs(marketIndicator.targetAarkPositionTheo)
+      //     : 0) *
+      //     price -
+      //     positionUSDTValue
+      // );
     }
 
     return targetAarkPositions;
