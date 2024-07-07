@@ -138,9 +138,13 @@ export class Strategy {
       return;
     }
 
+    await this._checkBalance();
+
     if (!this.okxService.isOrderbookAvailable(Date.now())) {
       return;
     }
+
+    await this._updateBlackListInfo();
 
     if (!(await this._fetchData())) {
       return;
@@ -148,10 +152,6 @@ export class Strategy {
     if (!(await this._fetchPriceData())) {
       return;
     }
-
-    await this._updateBlackListInfo();
-
-    await this._checkBalance();
 
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
