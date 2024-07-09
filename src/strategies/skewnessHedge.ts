@@ -632,47 +632,47 @@ export class Strategy {
     const aarkBalanceUSDC = this._getAarkUSDCBalance();
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
 
-    const depositHistory = await this.okxService.fetchDepositHistory();
-    const okxPendingUSDT = depositHistory
-      .filter(
-        (info: any) =>
-          info.state != "2" &&
-          info.ccy === "USDT" &&
-          info.chain === "USDT-Arbitrum One"
-      )
-      .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
-    this.localState.okxPendingUSDT = okxPendingUSDT;
-    const blockedDeposit = depositHistory.filter(
-      (info: any) =>
-        Number(info.state) >= 8 &&
-        info.ccy === "USDT" &&
-        info.chain === "USDT-Arbitrum One"
-    );
-    console.log(
-      JSON.stringify({
-        okxUSDT: round_dp(okxBalanceUSDT, 2),
-        aarkUSDC: round_dp(aarkBalanceUSDC, 2),
-        okxPendingUSDT: round_dp(okxPendingUSDT, 2),
-        totalUSDT: round_dp(
-          okxPendingUSDT + okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
-          2
-        ),
-        rebalanceState: this.localState.rebalanceState.state,
-      })
-    );
-    if (blockedDeposit.length > 0) {
-      this.monitorService.slackMessage(
-        "OKX USDT DEPOSIT BLOCKED",
-        JSON.stringify(blockedDeposit),
-        60_000,
-        true,
-        true
-      );
-      this.localState.rebalanceState.state = RebalanceState.HALT;
-    } else if (
+    // const depositHistory = await this.okxService.fetchDepositHistory();
+    // const okxPendingUSDT = depositHistory
+    //   .filter(
+    //     (info: any) =>
+    //       info.state != "2" &&
+    //       info.ccy === "USDT" &&
+    //       info.chain === "USDT-Arbitrum One"
+    //   )
+    //   .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
+    // this.localState.okxPendingUSDT = okxPendingUSDT;
+    // const blockedDeposit = depositHistory.filter(
+    //   (info: any) =>
+    //     Number(info.state) >= 8 &&
+    //     info.ccy === "USDT" &&
+    //     info.chain === "USDT-Arbitrum One"
+    // );
+    // console.log(
+    //   JSON.stringify({
+    //     okxUSDT: round_dp(okxBalanceUSDT, 2),
+    //     aarkUSDC: round_dp(aarkBalanceUSDC, 2),
+    //     okxPendingUSDT: round_dp(okxPendingUSDT, 2),
+    //     totalUSDT: round_dp(
+    //       okxPendingUSDT + okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
+    //       2
+    //     ),
+    //     rebalanceState: this.localState.rebalanceState.state,
+    //   })
+    // );
+    // if (blockedDeposit.length > 0) {
+    //   this.monitorService.slackMessage(
+    //     "OKX USDT DEPOSIT BLOCKED",
+    //     JSON.stringify(blockedDeposit),
+    //     60_000,
+    //     true,
+    //     true
+    //   );
+    //   this.localState.rebalanceState.state = RebalanceState.HALT;
+    if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
-      okxBalanceUSDT + aarkBalanceUSDC + okxPendingUSDT <
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
+      okxBalanceUSDT + aarkBalanceUSDC <
         this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
       this.monitorService.slackMessage(
@@ -687,8 +687,8 @@ export class Strategy {
       );
     } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
-      okxBalanceUSDT + okxPendingUSDT <
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
+      okxBalanceUSDT <
         this.params.INITIAL_BALANCE_USDT *
           (this.params.BALANCE_RATIO_IN_OKX -
             this.params.BALANCE_RATIO_DIFF_THRESHOLD)
@@ -707,7 +707,7 @@ export class Strategy {
       this._rebalanceFromAarkToOkx();
     } else if (
       this.localState.rebalanceState.state === RebalanceState.NONE &&
-      this.localState.rebalanceState.timestamp + 300_000 < timestamp &&
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
       aarkBalanceUSDC <
         this.params.INITIAL_BALANCE_USDT *
           (this.params.BALANCE_RATIO_IN_AARK -
@@ -1474,7 +1474,41 @@ export class Strategy {
         "USDT",
         usdtBalance
       );
-      await sleep(5000);
+      let cnt = 0;
+      while (true) {
+        await sleep(30000);
+        const depositHistory = await this.okxService.fetchDepositHistory();
+        const okxPendingUSDT = depositHistory
+          .filter(
+            (info: any) =>
+              info.state != "2" &&
+              info.ccy === "USDT" &&
+              info.chain === "USDT-Arbitrum One"
+          )
+          .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
+        this.localState.okxPendingUSDT = okxPendingUSDT;
+        const blockedDeposit = depositHistory.filter(
+          (info: any) =>
+            Number(info.state) >= 8 &&
+            info.ccy === "USDT" &&
+            info.chain === "USDT-Arbitrum One"
+        );
+
+        if (blockedDeposit.length > 0) {
+          throw Error(`Blocked deposit : ${JSON.stringify(blockedDeposit)}`);
+        } else if (okxPendingUSDT == 0) {
+          console.log("OKX Deposit Complete");
+          await sleep(10_000);
+          this.localState.okxPendingUSDT = 0;
+          break;
+        } else {
+          console.log("OKX Deposit Proceeding...");
+          cnt += 1;
+          if (cnt > 20) {
+            throw Error("Deposit is not confirmed for 10min");
+          }
+        }
+      }
     } catch (e) {
       console.log(e);
       this.monitorService.slackMessage(
