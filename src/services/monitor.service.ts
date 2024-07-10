@@ -1,36 +1,42 @@
 import { Twilio } from "twilio";
 import {
-  ISlackMessage,
-  ISlackParam,
   ITWilioParam,
+  IManagerParam,
 } from "../interfaces/monitoring-interface";
 import axios from "axios";
 
 export class MonitorService {
   private static instance: MonitorService;
-  private twilioParam?: ITWilioParam;
+  private twilioParam: ITWilioParam;
   private twilioClient: Twilio;
-  private slackParam?: ISlackParam;
+  private slackUrl: string;
+  private managerParam: IManagerParam[];
   private slackMessageTimestamp: { [topic: string]: number } = {};
   private lastCallTimestamp: number;
 
   static getInstance(): MonitorService {
     if (!MonitorService.instance) {
       MonitorService.instance = new MonitorService(
+        process.env.SLACK_URL!,
         JSON.parse(process.env.TWILIO_PARAM!),
-        JSON.parse(process.env.SLACK_PARAM!)
+        JSON.parse(process.env.MANAGER_PARAM!)
       );
     }
     return MonitorService.instance;
   }
 
-  constructor(twilioParam?: ITWilioParam, slackParam?: ISlackParam) {
+  constructor(
+    slackUrl: string,
+    twilioParam: ITWilioParam,
+    managerParam: IManagerParam[]
+  ) {
     this.twilioParam = twilioParam;
     this.twilioClient = new Twilio(
       twilioParam?.accountSid,
       twilioParam?.authToken
     );
-    this.slackParam = slackParam;
+    this.slackUrl = slackUrl;
+    this.managerParam = managerParam;
     this.lastCallTimestamp = 0;
   }
 
@@ -41,24 +47,27 @@ export class MonitorService {
     tagManager: boolean = false,
     call: boolean = false
   ) {
-    if (this.slackParam === undefined) {
-      console.log(`UNDEINFED SLACK PARAM`);
-      return;
-    }
+    const managerTagStr = this.managerParam.reduce(
+      (acc: string, info: IManagerParam) => `${acc}<@${info.slackId}> `,
+      ""
+    );
     const text =
-      (tagManager ? `<@${this.slackParam.managerSlackId}> ` : "") +
+      (tagManager ? `${managerTagStr}` : "") +
       `*${new Date().toISOString()}*\n` +
       `[${topic}]\n${desc}`;
     console.log(text);
-    const timestamp = new Date().getTime();
-    if (this._isSlackSentRecently(topic, timestamp, interval)) {
-      return;
+    const timestamp = Date.now();
+    if (
+      this.slackUrl !== undefined ||
+      !this._isSlackSentRecently(topic, timestamp, interval)
+    ) {
+      console.log("Message at ", new Date().toISOString());
+      await axios.post(this.slackUrl, { text }, { timeout: 5000 });
+      this._setLastSlackMessage(topic, timestamp);
     }
     if (call) {
-      this._twilioCall();
+      this._twilioCall(interval);
     }
-    await axios.post(this.slackParam.url, { text }, { timeout: 5000 });
-    this._setLastSlackMessage(topic, timestamp);
   }
 
   private _setLastSlackMessage(topic: string, timestamp: number) {
@@ -76,24 +85,26 @@ export class MonitorService {
     );
   }
 
-  private _twilioCall() {
+  private _twilioCall(interval: number) {
     if (this.twilioParam === undefined) {
       console.log(`UNDEFINED TWILIO PARAM`);
       return;
-    } else if (this._isTwilioCallRecently()) {
+    } else if (this._isTwilioCallRecently(interval)) {
       return;
     }
-    this.twilioClient.calls.create({
-      url: this.twilioParam.url,
-      to: this.twilioParam.managerNumber,
-      from: this.twilioParam.twilioNumber,
-    });
+
+    for (const info of this.managerParam) {
+      this.twilioClient.calls.create({
+        url: this.twilioParam.url,
+        to: info.phoneNumber,
+        from: this.twilioParam.twilioNumber,
+      });
+    }
+    this.lastCallTimestamp = Date.now();
   }
 
-  private _isTwilioCallRecently(): boolean {
-    const timestamp = new Date().getTime();
-    return this.lastCallTimestamp > timestamp - this.twilioParam!.callInterval
-      ? true
-      : false;
+  private _isTwilioCallRecently(interval: number): boolean {
+    const timestamp = Date.now();
+    return this.lastCallTimestamp > timestamp - interval ? true : false;
   }
 }
