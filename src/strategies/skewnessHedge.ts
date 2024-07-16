@@ -702,7 +702,7 @@ export class Strategy {
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        true
+        false
       );
       this.localState.rebalanceState.state = RebalanceState.AARK_TO_OKX;
       this._rebalanceFromAarkToOkx();
@@ -722,7 +722,7 @@ export class Strategy {
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        true
+        false
       );
       this.localState.rebalanceState.state = RebalanceState.OKX_TO_AARK;
       this._rebalanceFromOkxToAark();
