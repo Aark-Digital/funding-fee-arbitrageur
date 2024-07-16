@@ -1476,23 +1476,35 @@ export class Strategy {
         usdtBalance
       );
       let cnt = 0;
+      let depositReceived = false;
       while (true) {
         await sleep(30000);
         const depositHistory = await this.okxService.fetchDepositHistory();
-        const okxPendingUSDT = depositHistory
-          .filter(
-            (info: any) =>
-              info.state != "2" &&
-              info.ccy === "USDT" &&
-              info.chain === "USDT-Arbitrum One"
-          )
-          .reduce((acc: number, deposit: any) => acc + Number(deposit.amt), 0);
-        this.localState.okxPendingUSDT = okxPendingUSDT;
-        const blockedDeposit = depositHistory.filter(
+
+        const pendingDepositHistory = depositHistory.filter(
           (info: any) =>
-            Number(info.state) >= 8 &&
+            info.state != "2" &&
             info.ccy === "USDT" &&
             info.chain === "USDT-Arbitrum One"
+        );
+        if (pendingDepositHistory.length > 0) {
+          depositReceived = true;
+        }
+
+        if (cnt > 2 && depositReceived === false) {
+          throw Error("Deposit Request is not recognized for 1min");
+        }
+        console.log(
+          "Pending Deposit History : ",
+          JSON.stringify(pendingDepositHistory)
+        );
+        const okxPendingUSDT = pendingDepositHistory.reduce(
+          (acc: number, deposit: any) => acc + Number(deposit.amt),
+          0
+        );
+        this.localState.okxPendingUSDT = okxPendingUSDT;
+        const blockedDeposit = pendingDepositHistory.filter(
+          (info: any) => Number(info.state) >= 8
         );
 
         if (blockedDeposit.length > 0) {
@@ -1505,8 +1517,8 @@ export class Strategy {
         } else {
           console.log("OKX Deposit Proceeding...");
           cnt += 1;
-          if (cnt > 20) {
-            throw Error("Deposit is not confirmed for 10min");
+          if (cnt > 60) {
+            throw Error("Deposit is not confirmed for 30min");
           }
         }
       }
