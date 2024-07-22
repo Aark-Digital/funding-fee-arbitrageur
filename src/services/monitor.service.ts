@@ -58,7 +58,7 @@ export class MonitorService {
     console.log(text);
     const timestamp = Date.now();
     if (
-      this.slackUrl !== undefined ||
+      this.slackUrl !== undefined &&
       !this._isSlackSentRecently(topic, timestamp, interval)
     ) {
       console.log("Message at ", new Date().toISOString());
