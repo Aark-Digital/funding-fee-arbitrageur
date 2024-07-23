@@ -12,9 +12,27 @@ import { MonitorService } from "../services/monitor.service";
 import { OkxSwapService } from "../services/okx.service";
 import { formatNumber, round_dp, EPSILON } from "../utils/number";
 import { addCreateMarketParams, applyQtyPrecision } from "../utils/order";
-import { ONE_HOUR_IN_MS } from "../utils/time";
+
 import { isValidData } from "../utils/validation";
-import { MarketIndicator } from "../interfaces/okxAarkArbitrage-interface";
+import { ONE_HOUR_IN_MS, sleep } from "../utils/time";
+import { uniswapArbitrum } from "../utils/uniswap";
+import { approveERC20, getERC20Balance, transferERC20 } from "../utils/erc20";
+import { contractAddressMap } from "../constants/contract-address";
+interface MarketIndicator {
+  crypto: string;
+  skewnessValue: number;
+  targetAarkPositionTheo: number;
+  targetAarkPosition: number;
+  aarkFundingTerm: number;
+  okxFundingTerm: number;
+}
+
+enum RebalanceState {
+  NONE = "None",
+  OKX_TO_AARK = "OKX to AARk",
+  AARK_TO_OKX = "AARK to OKX",
+  HALT = "HALT",
+}
 
 export class Strategy {
   private readonly aarkService: AarkService;
@@ -22,10 +40,12 @@ export class Strategy {
   private readonly monitorService = MonitorService.getInstance();
   private params: any = {};
   private readonly localState = {
+    rebalanceState: { state: RebalanceState.NONE, timestamp: 0 },
     unhedgedCnt: 0,
     lastOrderTimestamp: {} as { [key: string]: number },
     premiumEMA: {} as { [key: string]: { value: number; weight: number } },
     arbSnapshot: {},
+    okxPendingUSDT: 0,
   };
 
   constructor() {
@@ -51,8 +71,12 @@ export class Strategy {
     await this._fetchData();
     await this._fetchPriceData();
 
+    if (this.params.OKX_DEPOSIT_ADDRESS === undefined) {
+      throw Error("Undefined OKX_DEPOSIT_ADDRES");
+    }
+
     this.monitorService.slackMessage(
-      "ARBITRAGEUR START",
+      "okxAarkArbitrageV3 START",
       `${JSON.stringify(this.params.TARGET_CRYPTO_LIST)}`,
       0,
       true,
@@ -70,6 +94,17 @@ export class Strategy {
     const okxActionParams: IActionParam[] = [];
     const aarkActionParams: IActionParam[] = [];
 
+    if (this.localState.rebalanceState.state === RebalanceState.HALT) {
+      this.monitorService.slackMessage(
+        `REBALANCE HALTED`,
+        "",
+        60_000,
+        true,
+        true
+      );
+      return;
+    }
+
     if (!this.okxService.isOrderbookAvailable(Date.now())) {
       return;
     }
@@ -81,7 +116,8 @@ export class Strategy {
       return;
     }
 
-    this._checkBalance();
+    // Check balance should be done after fetch data
+    await this._checkBalance();
 
     const okxMarkets = this.okxService.getMarketInfo();
     const aarkMarkets = this.aarkService.getMarketInfo();
@@ -195,7 +231,7 @@ export class Strategy {
         aarkMarketStatus: aarkMarket.marketStatus,
         aarkIndexPrice: aarkMarket.indexPrice,
         orderSizeInAark,
-        timestamp: Date.now(),
+        timestamp: detectionStart,
       });
       console.log(JSON.stringify(marketArbitrageInfo));
       if (
@@ -226,6 +262,7 @@ export class Strategy {
     }
     this._logActionParams(okxActionParams);
     this._logActionParams(aarkActionParams);
+    this._logBalance();
 
     ///////////////
     // EXECUTION //
@@ -242,21 +279,25 @@ export class Strategy {
         `Failed to execute order : ${e}`,
         0,
         true,
-        true
+        false
       );
     }
 
     console.log(`Strategy end. Elapsed ${Date.now() - strategyStart}ms`);
     if (!hedged) {
-      this.monitorService.slackMessage(
-        `ARBITRAGEUR UNHEDGED`,
-        `Unhedged for ${this.localState.unhedgedCnt} iteration`,
-        60_000,
-        true,
-        true
-      );
+      this.localState.unhedgedCnt += 1;
+      if (this.localState.unhedgedCnt > 5) {
+        this.monitorService.slackMessage(
+          `ARBITRAGEUR UNHEDGED`,
+          `Unhedged for ${this.localState.unhedgedCnt} iteration`,
+          60_000,
+          true,
+          true
+        );
+      }
     } else {
       this._logOrderInfoToSlack(okxActionParams, aarkActionParams, arbSnapshot);
+      this.localState.unhedgedCnt = 0;
     }
 
     return;
@@ -274,6 +315,7 @@ export class Strategy {
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_REBALANCE_USDT,
       MAX_ORDERBOOK_SLIPPAGE,
       MAX_TOTAL_POSITION_USDT,
 
@@ -298,6 +340,7 @@ export class Strategy {
 
       process.env.MAX_LEVERAGE!,
       process.env.MAX_ORDER_USDT!,
+      process.env.MAX_REBALANCE_USDT!,
       process.env.MAX_ORDERBOOK_SLIPPAGE!,
       process.env.MAX_TOTAL_POSITION_USDT!,
 
@@ -314,6 +357,7 @@ export class Strategy {
     ].map((param: string) => parseFloat(param));
 
     const TARGET_CRYPTO_LIST = JSON.parse(process.env.TARGET_CRYPTO_LIST!);
+    const OKX_DEPOSIT_ADDRESS = process.env.OKX_DEPOSIT_ADDRESS!;
 
     this.params = {
       TARGET_CRYPTO_LIST,
@@ -321,6 +365,7 @@ export class Strategy {
       EMA_WINDOW,
       ENTER_SKEWNESS_RATIO,
       UNHEDGED_THRESHOLD_USDT,
+      OKX_DEPOSIT_ADDRESS,
       BASE_PRICE_DIFF_THRESHOLD,
       OKX_FUNDING_RATE_DODGE_THRESHOLD,
       OPEN_AARK_FUNDING_TERM_THRESHOLD,
@@ -328,6 +373,7 @@ export class Strategy {
 
       MAX_LEVERAGE,
       MAX_ORDER_USDT,
+      MAX_REBALANCE_USDT,
       MAX_ORDERBOOK_SLIPPAGE,
       MAX_TOTAL_POSITION_USDT,
 
@@ -403,18 +449,40 @@ export class Strategy {
   _logBalanceToSlack() {
     const okx = this._getOkxUSDTBalance();
     const aark = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
     this.monitorService.slackMessage(
       "BALANCE INFO",
       JSON.stringify({
         "AARK USDC Balance": aark.toFixed(2),
         "OKX USDT Balance": okx.toFixed(2),
+        "OKX Pending USDT": okxPendingUSDT.toFixed(2),
         "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
-        "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
+        "TOTAL USDT": (okxPendingUSDT + okx + aark * USDC_USDT_PRICE).toFixed(
+          2
+        ),
+        "Rebalance State": this.localState.rebalanceState.state,
       }),
       60_000,
       false,
       false
+    );
+  }
+
+  _logBalance() {
+    const okx = this._getOkxUSDTBalance();
+    const aark = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
+    const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
+    console.log(
+      JSON.stringify({
+        "AARK USDC Balance": aark.toFixed(2),
+        "OKX USDT Balance": okx.toFixed(2),
+        "OKX Pending USDT": okxPendingUSDT.toFixed(2),
+        "USDC/USDT": USDC_USDT_PRICE.toFixed(6),
+        "TOTAL USDT": (okx + aark * USDC_USDT_PRICE).toFixed(2),
+        "Rebalance State": this.localState.rebalanceState.state,
+      })
     );
   }
 
@@ -486,23 +554,17 @@ export class Strategy {
     }
   }
 
-  _checkBalance() {
+  async _checkBalance() {
+    const timestamp = Date.now();
     const okxBalanceUSDT = this._getOkxUSDTBalance();
     const aarkBalanceUSDC = this._getAarkUSDCBalance();
     const USDC_USDT_PRICE = this._getOKXMidPrice("USDC");
-    console.log(
-      JSON.stringify({
-        okxUSDT: round_dp(okxBalanceUSDT, 2),
-        aarkUSDC: round_dp(aarkBalanceUSDC, 2),
-        totalUSDT: round_dp(
-          okxBalanceUSDT + aarkBalanceUSDC * USDC_USDT_PRICE,
-          2
-        ),
-      })
-    );
+
     if (
+      this.localState.rebalanceState.state === RebalanceState.NONE &&
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
       okxBalanceUSDT + aarkBalanceUSDC <
-      this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
+        this.params.INITIAL_BALANCE_USDT - this.params.LOSS_THRESHOLD
     ) {
       this.monitorService.slackMessage(
         "TOTAL BALANCE TOO LOW",
@@ -515,41 +577,45 @@ export class Strategy {
         true
       );
     } else if (
-      Math.abs(
-        okxBalanceUSDT -
-          this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_OKX
-      ) >
-      this.params.INITIAL_BALANCE_USDT *
-        this.params.BALANCE_RATIO_DIFF_THRESHOLD
+      this.localState.rebalanceState.state === RebalanceState.NONE &&
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
+      okxBalanceUSDT <
+        this.params.INITIAL_BALANCE_USDT *
+          (this.params.BALANCE_RATIO_IN_OKX -
+            this.params.BALANCE_RATIO_DIFF_THRESHOLD)
     ) {
       this.monitorService.slackMessage(
-        "OKX BALANCE OUT OF RANGE",
+        "TOO LOW OKX BALANCE",
         `okx balance USDT : ${formatNumber(
           okxBalanceUSDT,
           2
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        true
+        false
       );
+      this.localState.rebalanceState.state = RebalanceState.AARK_TO_OKX;
+      this._rebalanceFromAarkToOkx();
     } else if (
-      Math.abs(
-        aarkBalanceUSDC -
-          this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_AARK
-      ) >
-      this.params.INITIAL_BALANCE_USDT *
-        this.params.BALANCE_RATIO_DIFF_THRESHOLD
+      this.localState.rebalanceState.state === RebalanceState.NONE &&
+      this.localState.rebalanceState.timestamp + 30_000 < timestamp &&
+      aarkBalanceUSDC <
+        this.params.INITIAL_BALANCE_USDT *
+          (this.params.BALANCE_RATIO_IN_AARK -
+            this.params.BALANCE_RATIO_DIFF_THRESHOLD)
     ) {
       this.monitorService.slackMessage(
-        "AARK BALANCE OUT OF RANGE",
+        "TOO LOW AARK BALANCE",
         `okx balance USDT : ${formatNumber(
           okxBalanceUSDT,
           2
         )}USDT\naark balance USDC: ${formatNumber(aarkBalanceUSDC, 2)}USDC`,
         60_000,
         true,
-        true
+        false
       );
+      this.localState.rebalanceState.state = RebalanceState.OKX_TO_AARK;
+      this._rebalanceFromOkxToAark();
     }
   }
 
@@ -610,10 +676,13 @@ export class Strategy {
 
     const okxUSDTBalance = this._getOkxUSDTBalance();
     const aarkUSDCBalance = this._getAarkUSDCBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
     const maxPositionUSDT = Math.min(
       this.params.MAX_TOTAL_POSITION_USDT,
-      Math.min(okxUSDTBalance, aarkUSDCBalance * USDC_USDT_PRICE) *
-        this.params.MAX_LEVERAGE
+      Math.min(
+        okxPendingUSDT + okxUSDTBalance,
+        aarkUSDCBalance * USDC_USDT_PRICE
+      ) * this.params.MAX_LEVERAGE
     );
     let totalAbsPositionUSDT = this.params.TARGET_CRYPTO_LIST.reduce(
       (acc: number, crypto: string) => {
@@ -918,5 +987,424 @@ export class Strategy {
         false
       );
     }
+  }
+
+  async _rebalanceFromOkxToAark(): Promise<boolean> {
+    // 1. Withdraw USDT from OKX
+    // 2. Convert USDT to USDC with Uniswap
+    // 3. Deposit USDC to Aark futures account
+
+    const timestamp = Date.now();
+
+    this.monitorService.slackMessage(
+      `REBALANCE START`,
+      `Rebalance from OKX to AARK started : ${JSON.stringify({
+        startTime: new Date().toISOString(),
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
+    const aarkUSDC = this._getAarkUSDCBalance();
+    const okxUSDT = this._getOkxUSDTBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
+    const withdrawAmount = round_dp(
+      Math.max(
+        Math.min(
+          okxPendingUSDT +
+            okxUSDT -
+            this.params.INITIAL_BALANCE_USDT * this.params.BALANCE_RATIO_IN_OKX,
+          this.params.MAX_REBALANCE_USDT
+        ),
+        0
+      ),
+      4
+    );
+    const arbitrageur = this.aarkService.getSigner();
+
+    if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
+      this.monitorService.slackMessage(
+        `REBALANCE ERROR`,
+        `undefined withdrawAmount : ${withdrawAmount}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    if (withdrawAmount === 0) {
+      this.localState.rebalanceState = {
+        state: RebalanceState.NONE,
+        timestamp,
+      };
+      return true;
+    }
+
+    const rebalanceInfo = {
+      "AARK USDC Balance": aarkUSDC,
+      "OKX USDT Balance": okxUSDT + okxPendingUSDT,
+      "Amount to Rebalance": withdrawAmount,
+    };
+
+    console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
+
+    // Step 1 : Withdraw USDT from OKX
+    try {
+      const transferRes = await this.okxService.transferAsset(
+        "USDT",
+        withdrawAmount,
+        true
+      );
+      const transId = transferRes.transId;
+      let transferSuccess = false;
+      do {
+        await sleep(5000);
+        const response = await this.okxService.fetchTransferState(transId);
+        console.log(JSON.stringify(response));
+        if (response.state === "success") {
+          transferSuccess = true;
+        }
+      } while (!transferSuccess);
+      console.log(
+        `Transfer ${withdrawAmount} from Funding Account to Trading Account Done`
+      );
+      await sleep(5000);
+
+      const fundingUSDTBalance = await this.okxService.fetchFundingBalance(
+        "USDT"
+      );
+
+      const withdrawRes = await this.okxService.withdrawAssset(
+        "USDT",
+        fundingUSDTBalance.availBal,
+        arbitrageur.address
+      );
+      const wdId = withdrawRes.wdId;
+      let withdrawSuccess = false;
+      do {
+        await sleep(10000);
+        const response = await this.okxService.fetchWithdrawState(wdId);
+        console.log(JSON.stringify(response));
+        const withdrawStatus = response.state.split(":")[0].toLowerCase();
+        if (withdrawStatus === "cancellation complete") {
+          throw new Error("Withdraw from OKX cancelled");
+        } else if (withdrawStatus === "withdrawal complete") {
+          withdrawSuccess = true;
+        } else {
+          withdrawSuccess = false;
+        }
+      } while (!withdrawSuccess);
+      await sleep(5000);
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE OKX -> AARK FAILED",
+        `OKX withdaw failed ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    // Step 2 : Convert USDT to USDC with Uniswap
+    try {
+      const usdtBalance = await getERC20Balance(
+        arbitrageur,
+        "USDT",
+        arbitrageur.address
+      );
+
+      let swappedUSDC = await uniswapArbitrum(
+        arbitrageur,
+        "USDT",
+        "USDC",
+        usdtBalance
+      );
+      console.log("Swapped USDC : ", swappedUSDC);
+      await sleep(5000);
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE OKX -> AARK FAILED",
+        `Convert USDT -> USDC fail : ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    // Step 3 : Deposit USDC to Aark futures account
+    try {
+      const usdcBalance = await getERC20Balance(
+        arbitrageur,
+        "USDC",
+        arbitrageur.address
+      );
+      const vaultAddress = contractAddressMap["vault"];
+      await approveERC20(arbitrageur, vaultAddress, "USDC", usdcBalance);
+      await this.aarkService.depositUSDC(usdcBalance);
+      await sleep(5000);
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE OKX -> AARK FAILED",
+        `Aark Deposit fail : ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    this.localState.rebalanceState = {
+      state: RebalanceState.NONE,
+      timestamp,
+    };
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from OKX to AARK finished : ${JSON.stringify({
+        endTime: new Date().toISOString(),
+        elapsedTimeMs: Date.now() - timestamp,
+      })}`,
+      60_000,
+      false,
+      false
+    );
+    return true;
+  }
+
+  async _rebalanceFromAarkToOkx(): Promise<boolean> {
+    // 1. Withdraw USDC from Aark
+    // 2. Convert USDC to USDT
+    // 3. Send converted USDT to given OKX deposit address.
+    const timestamp = Date.now();
+
+    this.monitorService.slackMessage(
+      `REBALANCE START`,
+      `Rebalance from AARK to OKX started : ${JSON.stringify({
+        startTime: new Date().toISOString(),
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
+    const aarkUSDC = this._getAarkUSDCBalance();
+    const okxUSDT = this._getOkxUSDTBalance();
+    const okxPendingUSDT = this.localState.okxPendingUSDT;
+    const withdrawAmount = round_dp(
+      Math.max(
+        Math.min(
+          aarkUSDC -
+            this.params.INITIAL_BALANCE_USDT *
+              this.params.BALANCE_RATIO_IN_AARK,
+          this.params.MAX_REBALANCE_USDT
+        ),
+        0
+      ),
+      4
+    );
+
+    if (withdrawAmount === undefined || Number.isNaN(withdrawAmount)) {
+      this.monitorService.slackMessage(
+        `REBALANCE ERROR`,
+        `undefined withdrawAmount : ${withdrawAmount}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    if (withdrawAmount === 0) {
+      this.localState.rebalanceState = {
+        state: RebalanceState.NONE,
+        timestamp,
+      };
+      return true;
+    }
+
+    const arbitrageur = this.aarkService.getSigner();
+
+    const rebalanceInfo = {
+      "AARK USDC Balance": aarkUSDC,
+      "OKX USDT Balance": okxUSDT + okxPendingUSDT,
+      "Amount to Rebalance": withdrawAmount,
+    };
+    console.log(arbitrageur.address, rebalanceInfo, withdrawAmount);
+
+    // Step 1 : Withdraw USDC from Aark
+    try {
+      await this.aarkService.withdrawUSDC(withdrawAmount);
+      await sleep(5000);
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE AARK -> OKX FAILED",
+        `Aark withdraw fail : ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    // Step 2 : Convert USDC to USDT
+    try {
+      const usdcBalance = await getERC20Balance(
+        arbitrageur,
+        "USDC",
+        arbitrageur.address
+      );
+
+      let swappedUSDT = await uniswapArbitrum(
+        arbitrageur,
+        "USDC",
+        "USDT",
+        usdcBalance
+      );
+      console.log("Swapped USDT : ", swappedUSDT);
+      await sleep(5000);
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE AARK -> OKX FAILED",
+        `Convert USDC -> USDT fail : ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    // Step 3 : Send converted USDT to given OKX deposit address.
+    try {
+      if (this.params.OKX_DEPOSIT_ADDRESS === undefined) {
+        throw Error("Undefined OKX_DEPOSIT_ADDRESS");
+      }
+      const usdtBalance = await getERC20Balance(
+        arbitrageur,
+        "USDT",
+        arbitrageur.address
+      );
+      await transferERC20(
+        arbitrageur,
+        this.params.OKX_DEPOSIT_ADDRESS,
+        "USDT",
+        usdtBalance
+      );
+      let cnt = 0;
+      let depositReceived = false;
+      while (true) {
+        await sleep(30000);
+        const depositHistory = await this.okxService.fetchDepositHistory();
+
+        const pendingDepositHistory = depositHistory.filter(
+          (info: any) =>
+            info.state != "2" &&
+            info.ccy === "USDT" &&
+            info.chain === "USDT-Arbitrum One"
+        );
+        if (pendingDepositHistory.length > 0) {
+          depositReceived = true;
+        }
+
+        if (cnt > 2 && depositReceived === false) {
+          throw Error("Deposit Request is not recognized for 1min");
+        }
+        console.log(
+          "Pending Deposit History : ",
+          JSON.stringify(pendingDepositHistory)
+        );
+        const okxPendingUSDT = pendingDepositHistory.reduce(
+          (acc: number, deposit: any) => acc + Number(deposit.amt),
+          0
+        );
+        this.localState.okxPendingUSDT = okxPendingUSDT;
+        const blockedDeposit = pendingDepositHistory.filter(
+          (info: any) => Number(info.state) >= 8
+        );
+
+        if (blockedDeposit.length > 0) {
+          throw Error(`Blocked deposit : ${JSON.stringify(blockedDeposit)}`);
+        } else if (okxPendingUSDT == 0) {
+          console.log("OKX Deposit Complete");
+          await sleep(10_000);
+          this.localState.okxPendingUSDT = 0;
+          break;
+        } else {
+          console.log("OKX Deposit Proceeding...");
+          cnt += 1;
+          if (cnt > 60) {
+            throw Error("Deposit is not confirmed for 30min");
+          }
+        }
+      }
+    } catch (e) {
+      console.log(e);
+      this.monitorService.slackMessage(
+        "REBALANCE AARK -> OKX FAILED",
+        `OKX deposit fail : ${JSON.stringify(rebalanceInfo)}`,
+        60_000,
+        true,
+        true
+      );
+      this.localState.rebalanceState = {
+        state: RebalanceState.HALT,
+        timestamp,
+      };
+      return false;
+    }
+
+    this.localState.rebalanceState = {
+      state: RebalanceState.NONE,
+      timestamp,
+    };
+
+    this.monitorService.slackMessage(
+      `REBALANCE FINISHED`,
+      `Rebalance from AARK to OKX finished : ${JSON.stringify({
+        endTime: new Date().toISOString(),
+        elapsedTimeMs: Date.now() - timestamp,
+      })}`,
+      60_000,
+      false,
+      false
+    );
+
+    return true;
   }
 }
