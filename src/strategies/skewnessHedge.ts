@@ -109,7 +109,7 @@ export class Strategy {
     }
 
     this.monitorService.slackMessage(
-      "ARBITRAGEUR START",
+      "skewnessHedge START",
       `${JSON.stringify(this.params.TARGET_CRYPTO_LIST)}`,
       0,
       true,
